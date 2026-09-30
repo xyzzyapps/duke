@@ -1,0 +1,22 @@
+# Build output
+/bin/
+*.exe
+
+# Debug frame dumps
+/dump/
+dump*.png
+
+# Scratch dirs created by tests
+**/tmp-store-*/
+
+# Editor scratch files (your real notes stay tracked)
+untitled.txt
+
+# SFX fetch sources (see scripts/fetch-sfx.ps1)
+/sounds/_src/
+
+# Untitled-tab save experiments (scratch)
+/untitled-*
+
+**/tmp-gen-sounds-*/
+**/tmp-sounds-*/

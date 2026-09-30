@@ -1,0 +1,78 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Build the editor (runs fmt, vet and tests first)
+    cmds:
+      - task: build
+
+  fmt:
+    desc: Format all sources
+    cmds:
+      - gofmt -s -w ./cmd ./internal
+
+  vet:
+    desc: Format then run go vet
+    cmds:
+      - task: fmt
+      - go vet ./...
+
+  test:
+    desc: Format, vet, then run all unit tests
+    cmds:
+      - task: vet
+      - go test ./...
+
+  build:
+    desc: Format, vet, test, then compile to bin/duke.exe
+    cmds:
+      - task: test
+      - go build -o bin/duke.exe ./cmd/duke
+
+  run:
+    desc: Build and run the editor (extra args are passed through)
+    deps: [build]
+    cmds:
+      - ./bin/duke.exe {{.CLI_ARGS}}
+
+  dist:
+    desc: Native build + cross-compiled release binaries (linux, darwin)
+    cmds:
+      - task: build
+      - task: dist-linux
+      - task: dist-darwin
+      - task: dist-darwin-arm64
+
+  dist-linux:
+    desc: Cross-compile linux/amd64 (pure Go, no cgo)
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -trimpath -o bin/duke-linux-amd64 ./cmd/duke
+
+  dist-darwin:
+    desc: Cross-compile darwin/amd64 (pure Go, no cgo)
+    env:
+      GOOS: darwin
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -trimpath -o bin/duke-darwin-amd64 ./cmd/duke
+
+  dist-darwin-arm64:
+    desc: Cross-compile darwin/arm64 (Apple Silicon, pure Go, no cgo)
+    env:
+      GOOS: darwin
+      GOARCH: arm64
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -trimpath -o bin/duke-darwin-arm64 ./cmd/duke
+
+  check:
+    desc: Report formatting problems, vet issues and test failures
+    cmds:
+      - gofmt -l ./cmd ./internal
+      - go vet ./...
+      - go test ./...

@@ -1,0 +1,639 @@
+package render
+
+import (
+	"fmt"
+	"image/color"
+	"math"
+	"strings"
+
+	"github.com/hajimehoshi/bitmapfont/v4"
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
+	"github.com/hajimehoshi/ebiten/v2/vector"
+
+	"shooter/internal/actions"
+	"shooter/internal/agent"
+	"shooter/internal/doc"
+	"shooter/internal/grid"
+)
+
+// Screen geometry (see package docs for how the numbers relate).
+const (
+	Scale = 2  // font pixel scale: a 6x16 glyph becomes a 12x32 cell
+	Cols  = 80 // text viewport columns
+	Rows  = 16 // text viewport rows
+	BarH  = 32 // height of each HUD bar
+)
+
+// Palette: a dark DOS-terminal look.
+var (
+	colBG     = color.RGBA{13, 17, 23, 255}
+	colLine   = color.RGBA{22, 29, 39, 255} // caret row highlight
+	colText   = color.RGBA{201, 209, 217, 255}
+	colDim    = color.RGBA{110, 118, 129, 255}
+	colBar    = color.RGBA{22, 27, 34, 255}
+	colBorder = color.RGBA{48, 54, 61, 255}
+	colStatus = color.RGBA{227, 179, 65, 255}
+	colTitle  = color.RGBA{88, 166, 255, 255}
+	colLetter = color.RGBA{240, 246, 252, 255}
+	colTracer = color.RGBA{255, 214, 106, 255}
+	colCaret  = color.RGBA{120, 200, 255, 255}
+	// katana
+	colHandle    = color.RGBA{40, 34, 30, 255}
+	colBlade     = color.RGBA{214, 220, 232, 255}
+	colBladeEdge = color.RGBA{255, 255, 255, 255}
+	// rocket
+	colRocketBody  = color.RGBA{78, 82, 94, 255}
+	colRocketFlame = color.RGBA{255, 140, 48, 255}
+	// menus + dialogs
+	colMenuSel   = color.RGBA{38, 52, 74, 255}
+	colActorName = color.RGBA{174, 196, 224, 255}
+	colTitleBar  = color.RGBA{44, 78, 120, 255}
+	colStrip     = color.RGBA{17, 21, 27, 255}
+	colBarText   = color.RGBA{235, 240, 246, 255}
+)
+
+// HUD carries the chrome information the renderer needs each frame.
+type HUD struct {
+	Path   string     // file being edited (shown in the top bar)
+	Menu   *MenuState // menu-bar interaction state (nil = no menu drawn)
+	Dialog *Dialog    // modal dialog (Help/About), nil when closed
+
+	// Multiplayer presentation: remote participants (drawn as extra
+	// gunmen with name tags and cartoon chat bubbles) and the local
+	// player's own bubble / chat draft line.
+	Actors    []Actor
+	LocalChat *Bubble
+	ChatDraft *string   // open chat input (drawn in the bottom bar)
+	Tabs      []TabInfo // tab strip (drawn below the top bar)
+}
+
+// Actor is one remote participant's presentation state (world pixels).
+type Actor struct {
+	X, Y   float64
+	Facing int
+	State  agent.State
+	T      float64 // animation clock (breathing/walk phase)
+	Name   string  // tag above his head ("" = no tag)
+	Chat   string  // current chat bubble text ("" = none)
+	ChatT  float64 // seconds since Chat was set (drives the fade)
+}
+
+// Bubble is a chat balloon: text plus its age in seconds.
+type Bubble struct {
+	Text string
+	T    float64
+}
+
+// Renderer owns the layout, sprite sheet and particle system.
+type Renderer struct {
+	face      text.Face
+	sheet     *spriteSheet
+	layout    Layout
+	particles []particle
+}
+
+// New builds the renderer from the embedded bitmap font. The grid cell size
+// is derived from the font metrics: cellW = advance*Scale and
+// cellH = (ascent+descent)*Scale, so every glyph exactly fills a cell.
+func New() (*Renderer, error) {
+	face := text.NewGoXFace(bitmapfont.Face)
+	advance := text.Advance("M", face)
+	m := face.Metrics()
+	cellW := int(math.Round(advance)) * Scale
+	cellH := int(math.Round(m.HAscent+m.HDescent)) * Scale
+	if cellW <= 0 {
+		cellW = 6 * Scale // defensive fallback
+	}
+	if cellH <= 0 {
+		cellH = 16 * Scale
+	}
+	sheet, err := newSpriteSheet()
+	if err != nil {
+		return nil, err
+	}
+	return &Renderer{
+		face:   face,
+		sheet:  sheet,
+		layout: NewLayout(grid.Grid{CellW: cellW, CellH: cellH}, Cols, Rows, BarH),
+	}, nil
+}
+
+// Layout returns the live layout (camera included) for click mapping.
+func (r *Renderer) Layout() *Layout { return &r.layout }
+
+// ScreenSize returns the fixed window size for Ebitengine's Layout hook.
+func (r *Renderer) ScreenSize() (int, int) { return r.layout.ScreenW, r.layout.ScreenH }
+
+// Update advances the camera and the particle system. Pass the same view
+// snapshot that Draw receives (its FX were drained when the view was
+// created).
+func (r *Renderer) Update(dt float64, d doc.Document, v actions.View) {
+	cx := v.Agent.X + agent.SpriteW/2
+	cy := v.Agent.Y + agent.SpriteH/2
+	r.layout.follow(cx, cy, d, dt)
+	for _, e := range v.FX {
+		spawnParticles(&r.particles, e)
+	}
+	updateParticles(&r.particles, dt)
+}
+
+// Draw renders one frame: background, caret row, buffer text (with line
+// drag offsets), the gunman, projectiles, particles, then the HUD chrome.
+func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hud HUD) {
+	l := &r.layout
+	screen.Fill(colBG)
+
+	// Caret row highlight (the row the gunman stands on).
+	hlY := float64(l.OriginY) + float64(v.Caret.Line*l.CellH) - l.ScrollY
+	if hlY < float64(l.OriginY+l.ViewH) && hlY+float64(l.CellH) > float64(l.OriginY) {
+		vector.DrawFilledRect(screen, float32(l.OriginX), float32(hlY),
+			float32(l.ViewW), float32(l.CellH), colLine, false)
+	}
+
+	// Buffer text, one line at a time, with line-swap animation offsets.
+	first := int(math.Floor(l.ScrollY / float64(l.CellH)))
+	last := int(math.Floor((l.ScrollY + float64(l.ViewH)) / float64(l.CellH)))
+	for line := first; line <= last; line++ {
+		if line < 0 || line >= d.LineCount() {
+			continue
+		}
+		y := float64(l.OriginY) + float64(line*l.CellH) - l.ScrollY +
+			swapOffset(line, v.Swaps, l.CellH)
+		r.drawText(screen, d.Line(line), float64(l.OriginX)-l.ScrollX, y, colText, Scale)
+	}
+
+	// World entities, converted to screen space (the gunman covers his
+	// own cell, letters/bullets/particles fly above the text).
+	offX := float64(l.OriginX) - l.ScrollX
+	offY := float64(l.OriginY) - l.ScrollY
+	r.drawAgent(screen, v.Agent, offX, offY)
+	r.drawKatana(screen, v.Agent, offX, offY)
+	for _, let := range v.Letters {
+		r.drawLetter(screen, let, offX, offY)
+	}
+	for _, b := range v.Bullets {
+		r.drawBullet(screen, b, offX, offY)
+	}
+	drawParticles(screen, r.particles, offX, offY, r.runeDrawer(screen, offX, offY))
+
+	// Remote participants: gunman + name tag + chat bubble, then the
+	// local player's own bubble (his sprite is already drawn above).
+	for _, a := range hud.Actors {
+		r.drawActor(screen, a, offX, offY)
+	}
+	if hud.LocalChat != nil && hud.LocalChat.Text != "" {
+		cx := v.Agent.X + agent.SpriteW/2 + offX
+		r.drawBubble(screen, cx, v.Agent.Y+offY-4, *hud.LocalChat)
+	}
+
+	// HUD chrome on top so bleed-over from the text is covered.
+	r.drawHUD(screen, d, v, hud)
+	r.drawMenu(screen, hud)
+	if hud.Dialog != nil {
+		r.drawDialog(screen, *hud.Dialog)
+	}
+}
+
+// swapOffset returns the vertical pixel offset for a row that is taking
+// part in a line-drag animation (see actions.Swap).
+func swapOffset(line int, swaps []actions.Swap, cellH int) float64 {
+	for _, s := range swaps {
+		if s.T >= 1 {
+			continue
+		}
+		dy := float64(cellH) * float64(s.Dir) * (1 - s.T)
+		switch line {
+		case s.Row:
+			return dy // displaced line starts one row away
+		case s.Row + s.Dir:
+			return -dy // the dragged line starts at its old row
+		}
+	}
+	return 0
+}
+
+// drawAgent draws the gunman sprite with facing and pose offsets.
+// GeoM operations apply in call order, so the chain is: art-space pose
+// offset, optional mirror (still in art space), the art->screen scale that
+// matches the font's pixel size, then placement in screen space.
+func (r *Renderer) drawAgent(screen *ebiten.Image, a agent.Snapshot, offX, offY float64) {
+	id, xOff, yOff := r.sheet.pose(a)
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(xOff), float64(yOff))
+	if a.Facing < 0 {
+		op.GeoM.Scale(-1, 1)
+		op.GeoM.Translate(artW, 0)
+	}
+	op.GeoM.Scale(float64(Scale), float64(Scale))
+	op.GeoM.Translate(a.X+offX, a.Y+offY)
+	op.Filter = ebiten.FilterNearest
+	screen.DrawImage(r.sheet.image(id), op)
+}
+
+// drawLetter draws a thrown rune arcing from the gun tip to its cell.
+func (r *Renderer) drawLetter(screen *ebiten.Image, l actions.Letter, offX, offY float64) {
+	t := math.Min(1, math.Max(0, l.T))
+	x := l.FromX + (l.ToX-l.FromX)*t + offX
+	y := l.FromY + (l.ToY-l.FromY)*t + offY - math.Sin(math.Pi*t)*14
+	scale := float64(Scale) * (1 + 0.25*math.Sin(math.Pi*t)) // little pop mid-flight
+	r.drawRuneCentered(screen, l.R, x, y, scale, colLetter)
+}
+
+// drawKatana renders the giant blade during a slash: it grows out of his
+// hands and sweeps from raised-behind to forward-follow-through, leaving a
+// pale arc trail. Everything is vector geometry (the swing is far bigger
+// than any sprite frame could be).
+func (r *Renderer) drawKatana(screen *ebiten.Image, a agent.Snapshot, offX, offY float64) {
+	if a.State != agent.StateSlash {
+		return
+	}
+	const (
+		bladeLen = 30 // giant: nearly as tall as he is
+		handle   = 5
+	)
+	ang := katanaAngle(a.T)
+	dir := float64(a.Facing)
+	// Hands: front of the chest, mid height.
+	hx := a.X + offX + 12 + dir*7
+	hy := a.Y + offY + 17
+
+	// Trail: an arc the blade just swept through (only while it moves).
+	if a.T > 0.06 && a.T < 0.26 {
+		prev := katanaAngle(a.T - 0.06)
+		const segs = 6
+		for i := 0; i < segs; i++ {
+			a0 := prev + (ang-prev)*float64(i)/segs
+			a1 := prev + (ang-prev)*float64(i+1)/segs
+			r0, r1 := bladeLen*0.55, bladeLen*0.9
+			fade := float32(120 - i*18)
+			if fade < 20 {
+				fade = 20
+			}
+			vector.StrokeLine(screen,
+				float32(hx+dir*r0*math.Cos(a0)), float32(hy+r0*math.Sin(a0)),
+				float32(hx+dir*r1*math.Cos(a1)), float32(hy+r1*math.Sin(a1)),
+				float32(7-i), color.RGBA{255, 255, 255, uint8(fade)}, true)
+		}
+	}
+
+	// Handle + guard.
+	gx := hx + dir*handle*math.Cos(ang)
+	gy := hy + handle*math.Sin(ang)
+	vector.StrokeLine(screen, float32(hx), float32(hy), float32(gx), float32(gy),
+		4, colHandle, true)
+	// Blade.
+	tx := hx + dir*bladeLen*math.Cos(ang)
+	ty := hy + bladeLen*math.Sin(ang)
+	vector.StrokeLine(screen, float32(gx), float32(gy), float32(tx), float32(ty),
+		3, colBlade, true)
+	vector.StrokeLine(screen, float32(gx), float32(gy), float32(tx), float32(ty),
+		1, colBladeEdge, true)
+}
+
+// katanaAngle maps a swing's elapsed time (seconds) to the blade angle.
+// 0..0.10 raises the sword behind his head, 0.10..0.20 is the cut, and
+// the rest is follow-through.
+func katanaAngle(t float64) float64 {
+	const (
+		raised = -100 * math.Pi / 180
+		cut0   = -55 * math.Pi / 180
+		cut1   = 65 * math.Pi / 180
+		follow = 82 * math.Pi / 180
+	)
+	lerp := func(a, b, k float64) float64 { return a + (b-a)*math.Min(1, math.Max(0, k)) }
+	switch {
+	case t < 0.10:
+		return lerp(raised, cut0, t/0.10)
+	case t < 0.20:
+		return lerp(cut0, cut1, (t-0.10)/0.10)
+	default:
+		return lerp(cut1, follow, (t-0.20)/0.10)
+	}
+}
+
+// drawBullet draws the projectile: a tracer for the pistol, a fan of
+// pellets for the shotgun, a rocket for the launcher.
+func (r *Renderer) drawBullet(screen *ebiten.Image, b actions.Bullet, offX, offY float64) {
+	t := math.Min(1, math.Max(0, b.T))
+	hx := b.FromX + (b.ToX-b.FromX)*t + offX
+	hy := b.FromY + (b.ToY-b.FromY)*t + offY
+	tt := math.Max(0, t-0.4)
+	tx := b.FromX + (b.ToX-b.FromX)*tt + offX
+	ty := b.FromY + (b.ToY-b.FromY)*tt + offY
+
+	if b.Rocket {
+		r.drawRocket(screen, tx, ty, hx, hy, t)
+		return
+	}
+	vector.StrokeLine(screen, float32(tx), float32(ty), float32(hx), float32(hy),
+		2, colTracer, true)
+	if b.Spread {
+		// Two extra pellets fanning out around the main tracer.
+		for _, deg := range []float64{-9, 9} {
+			a := deg * math.Pi / 180
+			dx, dy := hx-tx, hy-ty
+			rx := dx*math.Cos(a) - dy*math.Sin(a)
+			ry := dx*math.Sin(a) + dy*math.Cos(a)
+			vector.StrokeLine(screen, float32(tx), float32(ty),
+				float32(tx+rx*0.9), float32(ty+ry*0.9), 1, colTracer, true)
+		}
+	}
+	vector.DrawFilledCircle(screen, float32(hx), float32(hy), 2.5, colWhite, true)
+}
+
+// drawRocket renders a small rocket with a flame trail from tail to head.
+func (r *Renderer) drawRocket(screen *ebiten.Image, tailX, tailY, headX, headY, t float64) {
+	dx, dy := headX-tailX, headY-tailY
+	len := math.Hypot(dx, dy)
+	if len < 0.001 {
+		return
+	}
+	ux, uy := dx/len, dy/len
+	// Body: thick dark line with a steel nose.
+	vector.StrokeLine(screen, float32(tailX), float32(tailY), float32(headX), float32(headY),
+		5, colRocketBody, true)
+	vector.DrawFilledCircle(screen, float32(headX), float32(headY), 3, colTracer, true)
+	// Flame behind the tail (flickers with the flight time).
+	flame := 5 + 3*math.Sin(t*40)
+	fx0 := tailX - ux*2
+	fy0 := tailY - uy*2
+	vector.StrokeLine(screen, float32(fx0), float32(fy0),
+		float32(fx0-ux*flame), float32(fy0-uy*flame), 4, colRocketFlame, true)
+	vector.StrokeLine(screen, float32(fx0), float32(fy0),
+		float32(fx0-ux*flame*0.6), float32(fy0-uy*flame*0.6), 2, colGold, true)
+}
+
+// drawHUD draws the top bar (file, position) and bottom bar (hints,
+// status message).
+func (r *Renderer) drawHUD(screen *ebiten.Image, d doc.Document, v actions.View, hud HUD) {
+	w, h := float32(r.layout.ScreenW), float32(r.layout.ScreenH)
+	// Bars.
+	vector.DrawFilledRect(screen, 0, 0, w, BarH, colBar, false)
+	// Tab strip below the top bar.
+	stripY := float32(BarH)
+	vector.DrawFilledRect(screen, 0, stripY, w, TabBarHeight, colStrip, false)
+	vector.DrawFilledRect(screen, 0, stripY+TabBarHeight-1, w, 1, colBorder, false)
+	rects := TabBarRects(tabTitles(hud.Tabs))
+	for i, rc := range rects {
+		if i >= len(hud.Tabs) {
+			break
+		}
+		if hud.Tabs[i].Active {
+			vector.DrawFilledRect(screen, float32(rc.X), float32(rc.Y),
+				float32(rc.W), float32(rc.H), colMenuSel, false)
+			vector.DrawFilledRect(screen, float32(rc.X), float32(rc.Y),
+				float32(rc.W), 2, colTitle, false)
+		}
+		col := colDim
+		if hud.Tabs[i].Active {
+			col = colText
+		}
+		r.drawText(screen, hud.Tabs[i].Title,
+			float64(rc.X+10), float64(rc.Y+2), col, 1)
+	}
+	vector.DrawFilledRect(screen, 0, h-BarH, w, BarH, colBar, false)
+	vector.DrawFilledRect(screen, 0, BarH-1, w, 1, colBorder, false)
+	vector.DrawFilledRect(screen, 0, h-BarH, w, 1, colBorder, false)
+
+	// Top-left: File/Help menu buttons, then the file name + dirty marker.
+	r.drawMenuButtons(screen, hud)
+	name := hud.Path
+	if name == "" {
+		name = "untitled"
+	}
+	if d.Dirty() {
+		name += " *"
+	}
+	r.drawText(screen, name, float64(HelpBtn.X+HelpBtn.W+10), 8, colText, 1)
+
+	// Top-right: caret position.
+	pos := fmt.Sprintf("Ln %d  Col %d", v.Caret.Line+1, v.Caret.Col+1)
+	r.drawTextRight(screen, pos, r.layout.ScreenW-8, 8, colDim, 1)
+
+	// Bottom-left: key hints, or the chat draft line while chatting.
+	if hud.ChatDraft != nil {
+		r.drawText(screen, "SAY: "+*hud.ChatDraft+"_", 8,
+			float64(r.layout.ScreenH-BarH+8), colStatus, 1)
+	} else {
+		r.drawText(screen,
+			"TYPE  BKSP:katana  ^BKSP:word  ^K:line  R-CLICK:shot  CLICK:walk  F2:say  ^S:save  F1:help",
+			8, float64(r.layout.ScreenH-BarH+8), colDim, 1)
+	}
+
+	// Bottom-right: status message.
+	if v.Status != "" {
+		r.drawTextRight(screen, v.Status, r.layout.ScreenW-8,
+			r.layout.ScreenH-BarH+8, colStatus, 1)
+	}
+}
+
+// drawMenuButtons paints the File/Help buttons in the top bar, with the
+// hovered or open button highlighted.
+func (r *Renderer) drawMenuButtons(screen *ebiten.Image, hud HUD) {
+	type btn struct {
+		rect  Rect
+		label string
+		id    int
+	}
+	btns := []btn{
+		{FileBtn, "File", 0},
+		{HelpBtn, "Help", 1},
+	}
+	for _, b := range btns {
+		active := false
+		if hud.Menu != nil {
+			if (b.id == 0 && hud.Menu.Open == MenuFile) ||
+				(b.id == 1 && hud.Menu.Open == MenuHelp) {
+				active = true
+			}
+			if hud.Menu.HoverBtn == b.id {
+				active = true
+			}
+		}
+		if active {
+			vector.DrawFilledRect(screen, float32(b.rect.X-3), float32(b.rect.Y),
+				float32(b.rect.W), float32(b.rect.H), colMenuSel, false)
+		}
+		r.drawText(screen, b.label, float64(b.rect.X), float32y(b.rect.Y+6), colText, 1)
+	}
+}
+
+// float32y keeps drawText calls readable (its y is a float64).
+func float32y(v int) float64 { return float64(v) }
+
+// drawMenu paints an open dropdown panel beneath its button.
+func (r *Renderer) drawMenu(screen *ebiten.Image, hud HUD) {
+	if hud.Menu == nil || hud.Menu.Open == MenuNone {
+		return
+	}
+	labels, btn := FileMenuItems, FileBtn
+	if hud.Menu.Open == MenuHelp {
+		labels, btn = HelpMenuItems, HelpBtn
+	}
+	rects := DropRects(btn, labels)
+	w := DropWidth(labels)
+	h := len(labels) * dropItemH
+	// Panel + border.
+	vector.DrawFilledRect(screen, float32(btn.X-2), float32(DropY-2),
+		float32(w+4), float32(h+4), colBorder, false)
+	vector.DrawFilledRect(screen, float32(btn.X), float32(DropY),
+		float32(w), float32(h), colBar, false)
+	for i, rc := range rects {
+		if hud.Menu.HoverItem == i {
+			vector.DrawFilledRect(screen, float32(rc.X), float32(rc.Y),
+				float32(rc.W), float32(rc.H), colMenuSel, false)
+		}
+		r.drawText(screen, labels[i], float64(rc.X+10), float64(rc.Y+3), colText, 1)
+	}
+}
+
+// drawDialog paints a centred modal dialog (Help/About) with a title bar
+// and a close hint.
+func (r *Renderer) drawDialog(screen *ebiten.Image, d Dialog) {
+	x, y, width, height, titleH, lineH, pad := dialogGeom(
+		r.layout.ScreenW, r.layout.ScreenH, d)
+	// Frame, body, title bar.
+	vector.DrawFilledRect(screen, float32(x-3), float32(y-3),
+		float32(width+6), float32(height+6), colBorder, false)
+	vector.DrawFilledRect(screen, float32(x), float32(y),
+		float32(width), float32(height), colBar, false)
+	vector.DrawFilledRect(screen, float32(x), float32(y),
+		float32(width), float32(titleH), colTitleBar, false)
+	r.drawText(screen, d.Title, float64(x+pad), float64(y+5), colBarText, 1)
+	for i, l := range d.Lines {
+		col := colText
+		if strings.HasPrefix(l, "http") || strings.HasPrefix(l, "Support") {
+			col = colStatus // highlight the support line and the link
+		}
+		r.drawText(screen, l, float64(x+pad), float64(y+titleH+i*lineH), col, 1)
+	}
+	r.drawText(screen, "Esc or click to close",
+		float64(x+pad), float64(y+titleH+len(d.Lines)*lineH+pad), colDim, 1)
+}
+
+// drawText draws s with its upper-left corner at (x, y). GeoM operations
+// are applied in call order: scale the glyph space first, then place it.
+func (r *Renderer) drawText(dst *ebiten.Image, s string, x, y float64, col color.Color, scale int) {
+	op := &text.DrawOptions{}
+	op.GeoM.Scale(float64(scale), float64(scale))
+	op.GeoM.Translate(x, y)
+	op.ColorScale.ScaleWithColor(col)
+	op.Filter = ebiten.FilterNearest
+	text.Draw(dst, s, r.face, op)
+}
+
+// drawTextRight draws s so that it ends at x (upper edge at y).
+func (r *Renderer) drawTextRight(dst *ebiten.Image, s string, x, y int, col color.Color, scale int) {
+	w := text.Advance(s, r.face) * float64(scale)
+	r.drawText(dst, s, float64(x)-w, float64(y), col, scale)
+}
+
+// drawRuneCentered draws one rune centred on (cx, cy) at the given scale:
+// centre the glyph box in local space, scale it, then place it.
+func (r *Renderer) drawRuneCentered(dst *ebiten.Image, ch rune, cx, cy, scale float64, col color.Color) {
+	s := string(ch)
+	w := text.Advance(s, r.face)
+	m := r.face.Metrics()
+	h := m.HAscent + m.HDescent
+	op := &text.DrawOptions{}
+	op.GeoM.Translate(-w/2, -h/2)
+	op.GeoM.Scale(scale, scale)
+	op.GeoM.Translate(cx, cy)
+	op.ColorScale.ScaleWithColor(col)
+	op.Filter = ebiten.FilterNearest
+	text.Draw(dst, s, r.face, op)
+}
+
+// runeDrawer adapts drawRuneCentered for the particle renderer, applying
+// the world-to-screen offset.
+func (r *Renderer) runeDrawer(dst *ebiten.Image, offX, offY float64) func(rune, float64, float64, color.Color) {
+	return func(ch rune, x, y float64, col color.Color) {
+		r.drawRuneCentered(dst, ch, x+offX, y+offY, Scale, col)
+	}
+}
+
+// drawActor draws one remote gunman: his sprite (mirrored by facing), the
+// name tag above his head and, when recent, a cartoon chat bubble over
+// that. The bubble fades out over its last two seconds.
+func (r *Renderer) drawActor(screen *ebiten.Image, a Actor, offX, offY float64) {
+	snap := agent.Snapshot{
+		X: a.X, Y: a.Y, Facing: a.Facing, State: a.State, T: a.T,
+	}
+	id, xOff, yOff := r.sheet.pose(snap)
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(float64(xOff), float64(yOff))
+	if a.Facing < 0 {
+		op.GeoM.Scale(-1, 1)
+		op.GeoM.Translate(artW, 0)
+	}
+	op.GeoM.Scale(float64(Scale), float64(Scale))
+	op.GeoM.Translate(a.X+offX, a.Y+offY)
+	op.Filter = ebiten.FilterNearest
+	screen.DrawImage(r.sheet.image(id), op)
+
+	top := a.Y + offY
+	if a.Name != "" {
+		w := text.Advance(a.Name, r.face)
+		r.drawText(screen, a.Name, a.X+offX+agent.SpriteW/2-w/2, top-11, colActorName, 1)
+		top -= 11
+	}
+	if a.Chat != "" && a.ChatT < BubbleLife {
+		r.drawBubble(screen, a.X+offX+agent.SpriteW/2, top-3, Bubble{Text: a.Chat, T: a.ChatT})
+	}
+}
+
+// BubbleLife is how long a chat balloon stays visible (seconds).
+const BubbleLife = 5.0
+
+// drawBubble draws a cartoon chat balloon whose tail points down at (cx,
+// anchorY). The last two seconds fade the whole bubble out.
+func (r *Renderer) drawBubble(screen *ebiten.Image, cx, anchorY float64, b Bubble) {
+	text := b.Text
+	if len(text) > 34 {
+		text = text[:33] + "~"
+	}
+	w := float64(len(text)*charW) + 14
+	if w < 46 {
+		w = 46
+	}
+	h := 18.0
+	x := cx - w/2
+	y := anchorY - h - 7
+	if x < 4 {
+		x = 4
+	}
+	if x+w > float64(r.layout.ScreenW)-4 {
+		x = float64(r.layout.ScreenW) - w - 4
+	}
+
+	alpha := uint8(255)
+	if fade := BubbleLife - b.T; fade < 2 {
+		if fade < 0 {
+			fade = 0
+		}
+		alpha = uint8(255 * fade / 2)
+	}
+	body := color.RGBA{248, 248, 240, alpha}
+	edge := color.RGBA{30, 30, 36, alpha}
+	textCol := color.RGBA{20, 20, 26, alpha}
+
+	// Tail: a little stem bump below the balloon.
+	vector.DrawFilledCircle(screen, float32(cx), float32(y+h-1), 6, edge, true)
+	vector.DrawFilledCircle(screen, float32(cx), float32(y+h-3), 5, body, true)
+	// Frame + body.
+	vector.DrawFilledRect(screen, float32(x-2), float32(y-2),
+		float32(w+4), float32(h+4), edge, false)
+	vector.DrawFilledRect(screen, float32(x), float32(y),
+		float32(w), float32(h), body, false)
+	r.drawText(screen, text, x+7, y+5, textCol, 1)
+}
+
+// tabTitles extracts titles for hit-testing geometry.
+func tabTitles(tabs []TabInfo) []string {
+	out := make([]string, len(tabs))
+	for i, t := range tabs {
+		out[i] = t.Title
+	}
+	return out
+}
