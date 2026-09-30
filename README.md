@@ -185,7 +185,6 @@ Design details, invariants and the full requirement spec live in
 
 ```sh
 go run ./cmd/duke -dump shot.png notes.txt
-go run ./cmd/duke -playsounds     # audition loop: cycles all six cues
 ```
 renders 90 frames, saves the screenshot to `shot.png` and exits — useful
 for checking the renderer without interacting.

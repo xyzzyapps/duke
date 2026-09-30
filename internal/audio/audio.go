@@ -335,7 +335,3 @@ func wavWrap(pcmData []byte) []byte {
 	binary.LittleEndian.PutUint32(h[40:], uint32(len(pcmData)))
 	return append(h, pcmData...)
 }
-
-// Cues lists every sound cue in default play order (used by tests and
-// the -playsounds audition mode).
-func Cues() []fx.Sound { return allSounds() }

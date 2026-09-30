@@ -183,3 +183,9 @@ and drags lines when you reorder them.
 - [x] -playsounds audition mode cycles all six cues (audio.Cues export,
       fx.Sound String for logs)
 - [x] Cross-compile verified for all three picker implementations
+
+## Phase 16 — Session 9: no ambient sound (user decision)
+- [x] Removed the -playsounds audition flag and ticker entirely; sound
+      now plays ONLY on editor actions (letters, weapons, save)
+- [x] Removed the audio.Cues export; README audition line dropped
+- [x] Verified: a plain 4s run emits zero play lines

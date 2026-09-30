@@ -84,10 +84,6 @@ type game struct {
 	frames int
 	done   bool
 	quit   bool
-	// audition mode (-playsounds)
-	audition bool
-	audT     float64
-	audCue   int
 }
 
 // Update polls input, advances the simulation and the camera once frame.
@@ -116,18 +112,7 @@ func (g *game) Update() error {
 	for _, snd := range g.view.Sounds {
 		g.synth.Play(snd)
 	}
-	// Audition: cycle every cue so the samples can be heard back-to-back.
-	if g.audition {
-		g.audT -= frameDT
-		if g.audT <= 0 {
-			g.audT = 1.1
-			cues := audio.Cues()
-			cue := cues[g.audCue%len(cues)]
-			g.audCue++
-			g.synth.Play(cue)
-			log.Printf("play: %s", cue)
-		}
-	}
+
 	g.rend.Update(frameDT, g.doc, g.view)
 	return nil
 }
@@ -252,8 +237,6 @@ func main() {
 	joinAddr := flag.String("join", "", "join a LAN session (host:port)")
 	name := flag.String("name", "", "participant name shown above your gunman")
 	botFlag := flag.Bool("bot", false, "join as the scripted test bot (needs -join)")
-	playsounds := flag.Bool("playsounds", false,
-		"cycle through all six sound cues on a loop (audition mode)")
 	synthFlag := flag.Bool("synth", false,
 		"use the built-in sound synthesizer instead of WAV samples (optional engine)")
 	flag.Parse()
@@ -356,19 +339,17 @@ func main() {
 	log.Printf("sound: %s", sound.Mode())
 
 	g := &game{
-		bus:      bus,
-		doc:      d,
-		engine:   engine,
-		rend:     rend,
-		editor:   editor,
-		synth:    sound,
-		tabs:     tabs,
-		nc:       nc,
-		audition: *playsounds,
-		audT:     0.5,
-		path:     path,
-		keys:     map[ebiten.Key]*repeatKey{},
-		dump:     *dump,
+		bus:    bus,
+		doc:    d,
+		engine: engine,
+		rend:   rend,
+		editor: editor,
+		synth:  sound,
+		tabs:   tabs,
+		nc:     nc,
+		path:   path,
+		keys:   map[ebiten.Key]*repeatKey{},
+		dump:   *dump,
 	}
 	for _, k := range watchedKeys {
 		g.keys[k] = &repeatKey{}
