@@ -104,3 +104,16 @@ func TestDiskSheetLoadsWithFallback(t *testing.T) {
 		t.Fatal("missing pose must be the placeholder box, not other art")
 	}
 }
+
+func TestTruncateChatToOneBubbleLine(t *testing.T) {
+	if got := truncateChat("short"); got != "short" {
+		t.Fatalf("short chat = %q", got)
+	}
+	long := truncateChat(strings.Repeat("x", 40))
+	if len(long) != 34 || long[33] != '~' {
+		t.Fatalf("long chat = %q (want 34 chars ending in ~)", long)
+	}
+	if truncateChat("") != "" {
+		t.Fatal("empty chat must stay empty")
+	}
+}

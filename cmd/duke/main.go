@@ -41,8 +41,11 @@ const (
 	repeatRate    = 0.07       // interval between repeats
 	mouseFireRate = 0.32       // held right-button rapid-fire interval
 	tabWheelStep  = 24         // px per wheel notch when scrolling the tab strip
-	dumpFrames    = 90         // frames rendered before a -dump screenshot
 )
+
+// dumpFrames is the frame count before a -dump screenshot (override with
+// -dumpframes for diagnostics).
+var dumpFrames = 90
 
 // errDone quits the game loop cleanly (used by -dump).
 var errDone = errors.New("frame dump complete")
@@ -353,13 +356,20 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	dump := flag.String("dump", "",
 		"render the scene, save a screenshot PNG to this path, then exit (debug)")
+	dumpFramesFlag := flag.Int("dumpframes", 0,
+		"override the frame count before a -dump screenshot (diagnostics)")
 	serveAddr := flag.String("serve", "", "host a LAN session (e.g. :3310)")
 	joinAddr := flag.String("join", "", "join a LAN session (host:port)")
 	name := flag.String("name", "", "participant name shown above your gunman")
-	botFlag := flag.Bool("bot", false, "join as the scripted test bot (needs -join)")
+	botFlag := flag.Bool("bot", false, "run the virtual test bot in this session")
+	botSeed := flag.Int64("botseed", 0,
+		"deterministic virtual-bot seed (0 = random; diagnostics)")
 	synthFlag := flag.Bool("synth", false,
 		"use the built-in sound synthesizer instead of WAV samples (optional engine)")
 	flag.Parse()
+	if *dumpFramesFlag > 0 {
+		dumpFrames = *dumpFramesFlag
+	}
 
 	pname := *name
 	if pname == "" {
@@ -419,7 +429,7 @@ func main() {
 				ncRef.emit(op)
 			}
 		})
-		nc = newNetCtl(sess, host, obs, rend.Layout().Grid, pname, *botFlag)
+		nc = newNetCtl(sess, host, obs, rend.Layout().Grid, pname, *botFlag, *botSeed)
 		ncRef = nc
 		d = obs
 	}
@@ -526,7 +536,17 @@ func main() {
 		w, h = fitWindowToMonitor(w, h, mw, mh)
 	}
 	ebiten.SetWindowSize(w, h)
-	ebiten.SetWindowTitle("DUKE - gunman text editor [" + filepath.Base(path) + "]")
+	// The window title states the ROLE so the test windows are never
+	// confused: the host window is the human's; the bot window belongs
+	// to the scripted peer.
+	title := "DUKE - gunman text editor [" + filepath.Base(path) + "]"
+	switch {
+	case *botFlag:
+		title += " - BOT (scripted peer)"
+	case *serveAddr != "":
+		title += " - HOST"
+	}
+	ebiten.SetWindowTitle(title)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeDisabled)
 	log.Printf("start: file=%s window=%dx%d", path, w, h)
 

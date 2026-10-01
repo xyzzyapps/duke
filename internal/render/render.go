@@ -90,6 +90,7 @@ type Actor struct {
 	Facing int
 	State  agent.State
 	T      float64 // animation clock (breathing/walk phase)
+	Frame  int     // walk-cycle frame for StateWalk (drives remote gait)
 	Name   string  // tag above his head ("" = no tag)
 	Chat   string  // current chat bubble text ("" = none)
 	ChatT  float64 // seconds since Chat was set (drives the fade)
@@ -98,6 +99,7 @@ type Actor struct {
 // Bubble is a chat balloon: text plus its age in seconds.
 type Bubble struct {
 	Text string
+	Name string // speaker (lost when the message is long ago)
 	T    float64
 }
 
@@ -740,7 +742,7 @@ func (r *Renderer) runeDrawer(dst *ebiten.Image, offX, offY float64) func(rune, 
 // that. The bubble fades out over its last two seconds.
 func (r *Renderer) drawActor(screen *ebiten.Image, a Actor, offX, offY float64) {
 	snap := agent.Snapshot{
-		X: a.X, Y: a.Y, Facing: a.Facing, State: a.State, T: a.T,
+		X: a.X, Y: a.Y, Facing: a.Facing, State: a.State, T: a.T, Frame: a.Frame,
 	}
 	id, xOff, yOff := r.sheet().pose(snap)
 	op := &ebiten.DrawImageOptions{}
@@ -753,37 +755,57 @@ func (r *Renderer) drawActor(screen *ebiten.Image, a Actor, offX, offY float64) 
 	}
 	op.GeoM.Scale(float64(Scale), float64(Scale))
 	op.GeoM.Translate(a.X+offX, a.Y+offY)
+	// Remote gunmen are tinted warm orange so a second player can never
+	// be confused with your own (identical) sprite - especially right
+	// after joining, when he spawns on top of you at the buffer start.
+	op.ColorScale.Scale(1, 0.86, 0.62, 1)
 	op.Filter = ebiten.FilterNearest
 	screen.DrawImage(r.sheet().image(id), op)
 
 	top := a.Y + offY
+	if a.Chat != "" && a.ChatT < BubbleLife {
+		// The bubble carries the speaker name: skip the floating tag
+		// while it is up.
+		r.drawBubble(screen, a.X+offX+agent.SpriteW/2, top,
+			Bubble{Text: a.Chat, Name: a.Name, T: a.ChatT})
+		return
+	}
 	if a.Name != "" {
 		w := text.Advance(a.Name, r.bufFace)
 		r.drawText(screen, a.Name, a.X+offX+agent.SpriteW/2-w/2, top-float64(r.bufLineH), colActorName)
-		top -= float64(r.bufLineH)
-	}
-	if a.Chat != "" && a.ChatT < BubbleLife {
-		r.drawBubble(screen, a.X+offX+agent.SpriteW/2, top-3, Bubble{Text: a.Chat, T: a.ChatT})
 	}
 }
 
 // BubbleLife is how long a chat balloon stays visible (seconds).
 const BubbleLife = 5.0
 
+// truncateChat clips an incoming chat line to one bubble line.
+func truncateChat(s string) string {
+	if len(s) > 34 {
+		return s[:33] + "~"
+	}
+	return s
+}
+
 // drawBubble draws a cartoon chat balloon whose tail points down at (cx,
-// anchorY). The last two seconds fade the whole bubble out.
+// anchorY). The panel is sized for the SHARED face (the old fixed-height
+// box made the 30px text spill out of it): a dark-blue speaker name on
+// its own line, the message below. The last 1.5 seconds fade it out.
 func (r *Renderer) drawBubble(screen *ebiten.Image, cx, anchorY float64, b Bubble) {
-	text := b.Text
-	if len(text) > 34 {
-		text = text[:33] + "~"
+	msg := truncateChat(b.Text)
+	name := b.Name
+	if name == "" {
+		name = "?"
 	}
-	w := float64(len(text)*charW) + 14
-	if w < 46 {
-		w = 46
+	lineH := float64(r.bufLineH)
+	w := text.Advance(name, r.bufFace)
+	if mw := text.Advance(msg, r.bufFace); mw > w {
+		w = mw
 	}
-	h := 18.0
+	w += 26
+	h := lineH*2 + 14
 	x := cx - w/2
-	y := anchorY - h - 7
+	y := anchorY - h - 8
 	if x < 4 {
 		x = 4
 	}
@@ -792,17 +814,19 @@ func (r *Renderer) drawBubble(screen *ebiten.Image, cx, anchorY float64, b Bubbl
 	}
 
 	alpha := uint8(255)
-	if fade := BubbleLife - b.T; fade < 2 {
+	if fade := BubbleLife - b.T; fade < 1.5 {
 		if fade < 0 {
 			fade = 0
 		}
-		alpha = uint8(255 * fade / 2)
+		alpha = uint8(255 * fade / 1.5)
 	}
 	body := color.RGBA{248, 248, 240, alpha}
 	edge := color.RGBA{30, 30, 36, alpha}
 	textCol := color.RGBA{20, 20, 26, alpha}
+	nameCol := color.RGBA{25, 60, 140, alpha}
 
-	// Tail: a little stem bump below the balloon.
+	// Tail: a little stem bump below the balloon (drawn first so the
+	// panel's bottom edge covers its top).
 	vector.DrawFilledCircle(screen, float32(cx), float32(y+h-1), 6, edge, true)
 	vector.DrawFilledCircle(screen, float32(cx), float32(y+h-3), 5, body, true)
 	// Frame + body.
@@ -810,7 +834,9 @@ func (r *Renderer) drawBubble(screen *ebiten.Image, cx, anchorY float64, b Bubbl
 		float32(w+4), float32(h+4), edge, false)
 	vector.DrawFilledRect(screen, float32(x), float32(y),
 		float32(w), float32(h), body, false)
-	r.drawText(screen, text, x+7, y+5, textCol)
+	// Speaker name on its own row, the message beneath it.
+	r.drawText(screen, name, x+13, y+5, nameCol)
+	r.drawText(screen, msg, x+13, y+5+lineH, textCol)
 }
 
 // tabTitles extracts titles for hit-testing geometry.

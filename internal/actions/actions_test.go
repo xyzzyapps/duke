@@ -8,6 +8,7 @@ import (
 	"shooter/internal/doc"
 	"shooter/internal/fx"
 	"shooter/internal/grid"
+	"shooter/internal/netplay"
 )
 
 const (
@@ -1069,5 +1070,35 @@ func TestExplicitOwnCellShotKeepsFacing(t *testing.T) {
 	})
 	if !ok || facing != 1 {
 		t.Fatalf("own-cell slash facing = %d (slash seen: %v), want 1", facing, ok)
+	}
+}
+
+func TestCaretAndAgentSurviveRemoteOps(t *testing.T) {
+	// The multiplayer host case: remote edits flood the shared doc while
+	// the LOCAL keyboard still steps the cursor and the agent follows it.
+	base := doc.New()
+	base.Load("aa\nbb\ncc\ndd\nee\nff\ngg\nhh")
+	obs := netplay.NewObservedDoc(base, nil) // wrapper without an emitter
+	e := New(obs, testGrid)
+	runFor(e, 0.5)
+
+	// A remote peer deletes line 0 entirely.
+	obs.ApplyRemote(netplay.OpForDelete(doc.Pos{Line: 0, Col: 0}, doc.Pos{Line: 1, Col: 0}))
+	runFor(e, 0.5)
+
+	// Local arrow: turn + step right, exactly like solo play.
+	e.Step(1)
+	if got := e.Caret(); got != (doc.Pos{Line: 0, Col: 1}) {
+		t.Fatalf("caret = %+v after arrow, want {0 1}", got)
+	}
+	// The agent must glue itself to the caret (followCaret) afterwards.
+	wantX, wantY := testGrid.AgentOrigin(e.Caret(), agent.SpriteH)
+	ok := runUntil(e, 2, func() bool {
+		v := e.View()
+		return v.Agent.X == wantX && v.Agent.Y == wantY
+	})
+	if !ok {
+		v := e.View()
+		t.Fatalf("agent at (%v,%v), want (%v,%v) on the caret", v.Agent.X, v.Agent.Y, wantX, wantY)
 	}
 }
