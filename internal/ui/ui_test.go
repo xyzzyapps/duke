@@ -1039,3 +1039,63 @@ func TestSettingsClickSwitchesSheet(t *testing.T) {
 		t.Fatalf("status = %q, want sprite sheet notice", h.engine.Status())
 	}
 }
+
+func TestTabStripScrollsWhenOverflowing(t *testing.T) {
+	h := newHarness("zero")
+	for i := 0; i < 7; i++ {
+		h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true})
+	}
+	tb := h.editor.svc.Tabs
+	if len(tb.Items) != 8 {
+		t.Fatalf("tabs = %d, want 8", len(tb.Items))
+	}
+	// 8 tabs x (11*12+22 box + 4 gap) + 8 lead = 1272 > the 960 harness
+	// strip, so the scroll range is 312px.
+	tb.ScrollBy(+9999, 12, 960)
+	if tb.ScrollX != 312 {
+		t.Fatalf("ScrollX = %d, want 312 (clamped)", tb.ScrollX)
+	}
+	tb.ScrollBy(-24, 12, 960)
+	if tb.ScrollX != 288 {
+		t.Fatalf("ScrollX = %d after one wheel notch, want 288", tb.ScrollX)
+	}
+	tb.ScrollBy(-9999, 12, 960)
+	if tb.ScrollX != 0 {
+		t.Fatalf("ScrollX = %d, want 0 (clamped)", tb.ScrollX)
+	}
+	// Scrolled to the end, the last tab is clickable at its shifted spot.
+	tb.ScrollBy(+9999, 12, 960)
+	rects := render.TabBarRects(tb.Titles(), 12)
+	last := rects[len(rects)-1]
+	if i, ok := h.editor.TabHitTest(last.X-tb.ScrollX+5, last.Y+3); !ok || i != 7 {
+		t.Fatalf("click on scrolled last tab = %d ok=%v, want 7", i, ok)
+	}
+}
+
+func TestNewTabRevealsItself(t *testing.T) {
+	h := newHarness("zero")
+	for i := 0; i < 8; i++ {
+		h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true})
+	}
+	tb := h.editor.svc.Tabs
+	tb.ScrollBy(+9999, 12, 960) // park at the end
+	// A new tab must be scrolled into view (its right edge on screen).
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true})
+	rects := render.TabBarRects(tb.Titles(), 12)
+	last := rects[len(rects)-1]
+	if last.X+last.W-tb.ScrollX > 960 {
+		t.Fatalf("new tab not revealed: right edge %d > 960 (scroll %d)", last.X+last.W-tb.ScrollX, tb.ScrollX)
+	}
+	// Switching to an off-screen tab reveals it too.
+	tb.ScrollBy(+9999, 12, 960)
+	for i := 0; i < 9; i++ {
+		h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageUp, Ctrl: true})
+	}
+	if tb.Active != 0 {
+		t.Fatalf("active = %d, want 0", tb.Active)
+	}
+	rects = render.TabBarRects(tb.Titles(), 12)
+	if first := rects[0].X - tb.ScrollX; first < 8 {
+		t.Fatalf("revealed first tab left edge = %d, want >= 8", first)
+	}
+}

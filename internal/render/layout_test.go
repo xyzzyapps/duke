@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -168,11 +169,30 @@ func TestTabBarRectsAndHit(t *testing.T) {
 			t.Fatalf("tab not inside strip: %+v", r)
 		}
 	}
-	if i, ok := TabHit(titles, 18, rects[1].X+5, rects[1].Y+3); !ok || i != 1 {
+	if i, ok := TabHit(titles, 18, 0, rects[1].X+5, rects[1].Y+3); !ok || i != 1 {
 		t.Fatalf("hit = %d ok=%v, want 1", i, ok)
 	}
-	if _, ok := TabHit(titles, 18, 10, 500); ok {
+	if _, ok := TabHit(titles, 18, 0, 10, 500); ok {
 		t.Fatal("click far below the strip must miss")
+	}
+}
+
+func TestTabHitHonoursStripScroll(t *testing.T) {
+	titles := make([]string, 10)
+	for i := range titles {
+		titles[i] = fmt.Sprintf("untitled-%d", i+1)
+	}
+	rects := TabBarRects(titles, 18)
+	const sc = 300
+	// In scrolled space the clicked tab is the one whose shifted rect
+	// contains the point.
+	px, py := rects[4].X-sc+5, rects[4].Y+3
+	if i, ok := TabHit(titles, 18, sc, px, py); !ok || i != 4 {
+		t.Fatalf("scrolled hit = %d ok=%v, want 4", i, ok)
+	}
+	// The same mouse x WITHOUT the scroll offset lands elsewhere.
+	if i, ok := TabHit(titles, 18, 0, px, py); !ok || i == 4 {
+		t.Fatalf("unscrolled hit = %d ok=%v, must not be 4", i, ok)
 	}
 }
 

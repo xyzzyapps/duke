@@ -81,6 +81,7 @@ type HUD struct {
 	LocalChat *Bubble
 	ChatDraft *string   // open chat input (drawn in the bottom bar)
 	Tabs      []TabInfo // tab strip (drawn below the top bar)
+	TabScroll int       // strip scroll in px (Tabs.ScrollX; wheel-scrolled)
 }
 
 // Actor is one remote participant's presentation state (world pixels).
@@ -490,6 +491,11 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v actions.View, hud HUD) {
 	for i, rc := range rects {
 		if i >= len(hud.Tabs) {
 			break
+		}
+		rc.X -= hud.TabScroll
+		// Cull tabs scrolled entirely out of the strip.
+		if rc.X+rc.W <= 0 || rc.X >= r.layout.ScreenW {
+			continue
 		}
 		if hud.Tabs[i].Active {
 			vector.DrawFilledRect(screen, float32(rc.X), float32(rc.Y),

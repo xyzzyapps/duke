@@ -122,6 +122,7 @@ func HelpLines() []string {
 		"ctrl + up / down .... grabs the line with his hands and drags it",
 		"ctrl + z / ctrl + y . undo / redo",
 		"ctrl + pgup / pgdn . previous / next tab",
+		"tab strip .......... mouse wheel scrolls it when tabs overflow",
 		"ctrl + s ............ save    ctrl + o: reload",
 		"sound button (top bar)  toggles mute",
 		"settings menu ........ sprite sheet + font size (18/24/30)",
@@ -221,9 +222,11 @@ func TabBarRects(titles []string, cellW int) []Rect {
 	return out
 }
 
-// TabHit maps a click on the tab strip to a tab index.
-func TabHit(titles []string, cellW int, x, y int) (int, bool) {
+// TabHit maps a click on the tab strip to a tab index, honouring the
+// strip scroll (scrollX is Tabs.ScrollX in px).
+func TabHit(titles []string, cellW, scrollX, x, y int) (int, bool) {
 	for i, r := range TabBarRects(titles, cellW) {
+		r.X -= scrollX
 		if r.Contains(x, y) {
 			return i, true
 		}

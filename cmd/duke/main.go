@@ -40,6 +40,7 @@ const (
 	repeatDelay   = 0.30       // held-key delay before repeating
 	repeatRate    = 0.07       // interval between repeats
 	mouseFireRate = 0.32       // held right-button rapid-fire interval
+	tabWheelStep  = 24         // px per wheel notch when scrolling the tab strip
 	dumpFrames    = 90         // frames rendered before a -dump screenshot
 )
 
@@ -138,6 +139,7 @@ func (g *game) Draw(screen *ebiten.Image) {
 		Menu:      g.editor.MenuState(),
 		Dialog:    g.editor.Dialog(),
 		ChatDraft: g.editor.ChatDraft(),
+		TabScroll: g.tabs.ScrollX,
 	}
 	if g.nc != nil {
 		hud.Actors = g.nc.actors()
@@ -237,6 +239,16 @@ func (g *game) collectInput(dt float64) {
 				continue // the scrollbar owns this press
 			}
 			g.bus.Publish(events.MousePressed{X: mx, Y: my, Button: btn})
+		}
+	}
+
+	// Mouse wheel over the tab strip scrolls it (sublime-style) when the
+	// tabs overflow; wheel up reveals earlier tabs.
+	if _, wy := ebiten.Wheel(); wy != 0 {
+		_, my := ebiten.CursorPosition()
+		if my >= render.BarH && my < render.BarH+render.TabBarHeight &&
+			g.editor.Dialog() == nil && g.editor.MenuState().Open == render.MenuNone {
+			g.tabs.ScrollBy(-int(wy)*tabWheelStep, g.rend.Layout().CellW, g.rend.Layout().ScreenW)
 		}
 	}
 

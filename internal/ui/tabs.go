@@ -22,7 +22,59 @@ type Tab struct {
 type Tabs struct {
 	Items   []*Tab
 	Active  int
+	ScrollX int // horizontal strip scroll (wheel over the tabs, sublime-style)
 	counter int // names the next untitled buffer
+}
+
+// scrollRange returns how far the strip can scroll (px) before dead
+// space appears at the right edge; 0 when every tab fits.
+func (t *Tabs) scrollRange(cellW, screenW int) int {
+	rects := render.TabBarRects(t.Titles(), cellW)
+	if len(rects) == 0 {
+		return 0
+	}
+	last := rects[len(rects)-1]
+	total := last.X + last.W + 4
+	if r := total - screenW; r > 0 {
+		return r
+	}
+	return 0
+}
+
+// ClampScroll keeps ScrollX inside [0, scrollRange].
+func (t *Tabs) ClampScroll(cellW, screenW int) {
+	if r := t.scrollRange(cellW, screenW); t.ScrollX > r {
+		t.ScrollX = r
+	}
+	if t.ScrollX < 0 {
+		t.ScrollX = 0
+	}
+}
+
+// ScrollBy shifts the strip by dx px (positive reveals later tabs) and
+// clamps. Wheel callers pass ebiten deltas inverted.
+func (t *Tabs) ScrollBy(dx, cellW, screenW int) {
+	t.ScrollX += dx
+	t.ClampScroll(cellW, screenW)
+}
+
+// Reveal scrolls so tab i is fully visible (called after switches and
+// tab creation).
+func (t *Tabs) Reveal(i, cellW, screenW int) {
+	rects := render.TabBarRects(t.Titles(), cellW)
+	if i < 0 || i >= len(rects) {
+		return
+	}
+	r := rects[i]
+	if right := r.X + r.W - t.ScrollX; right > screenW {
+		t.ScrollX = r.X + r.W - screenW
+	}
+	if left := r.X - t.ScrollX; left < 8 {
+		if t.ScrollX > r.X-8 {
+			t.ScrollX = r.X - 8
+		}
+	}
+	t.ClampScroll(cellW, screenW)
 }
 
 // Cur returns the active tab (nil when the strip is empty).
@@ -64,6 +116,7 @@ func (e *Editor) NewTab() {
 	path := fmt.Sprintf("untitled-%d", t.counter)
 	t.Items = append(t.Items, &Tab{Doc: doc.New(), Path: path})
 	t.Active = len(t.Items) - 1
+	t.Reveal(t.Active, e.svc.Layout.CellW, e.svc.Layout.ScreenW)
 	log.Printf("new tab: %s", path)
 	e.applyActive()
 	e.svc.Engine.SetStatus("NEW TAB " + path)
@@ -90,6 +143,7 @@ func (e *Editor) CloseTab() {
 		i = len(t.Items) - 1
 	}
 	t.Active = i
+	t.Reveal(i, e.svc.Layout.CellW, e.svc.Layout.ScreenW)
 	e.applyActive()
 }
 
@@ -101,6 +155,7 @@ func (e *Editor) SwitchTab(i int) {
 	}
 	e.saveCaret()
 	t.Active = i
+	t.Reveal(i, e.svc.Layout.CellW, e.svc.Layout.ScreenW)
 	log.Printf("switch to tab %d: %q", i, render.TabTitle(t.Cur().Path))
 	e.applyActive()
 }
@@ -144,7 +199,7 @@ func (e *Editor) TabHitTest(x, y int) (int, bool) {
 	if e.svc.Tabs == nil {
 		return 0, false
 	}
-	return render.TabHit(e.svc.Tabs.Titles(), e.svc.Layout.CellW, x, y)
+	return render.TabHit(e.svc.Tabs.Titles(), e.svc.Layout.CellW, e.svc.Tabs.ScrollX, x, y)
 }
 
 // setPath retargets the active tab (File > New) and the services copy.

@@ -28,6 +28,7 @@ size (1440x1100 at the default 30px face).
 | **`Ctrl+Delete`** | shotgun — blasts the word ahead + its trailing spaces |
 | **`Ctrl+K`** | **ROCKET LAUNCHER** — emacs kill-line (to end of line, joins at EOL) |
 | `Ctrl+PgUp` / `Ctrl+PgDn` | previous / next tab (wraps around) |
+| mouse wheel over the tab strip | scrolls the strip when tabs overflow (Sublime-style) |
 | **`Ctrl+U`** | rocket launcher — shell-style kill back to line start |
 | `Ctrl+A` / `Ctrl+E` | emacs: teleport to start / end of line |
 | `Enter` / `Tab` | split the line / insert 4 spaces |
