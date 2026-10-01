@@ -71,14 +71,13 @@ sprites/
           aim.png shotgun.png rocket.png katana.png kdraw.png win.png
 ```
 
-Edit or replace any PNG (any size — it is fitted to the 24x36 art box with
+Edit or replace any PNG (any size — it is fitted to the 18x24 art box with
 nearest-neighbour scaling; multiples of 18x24 are crispest) and relaunch:
 the change shows up in-game. Each **folder** under `sprites/` becomes its
-own character and appears in **Settings > Sprite Sheet**. You can even drop
-a single `idle.png` in a new folder — the missing poses reuse Duke's.
-`go run ./cmd/gensprites` re-exports the built-in sheets after an art
-change; the ASCII art in `internal/render/sprites.go` is the fallback
-source when a folder or pose is absent.
+own character and appears in **Settings > Sprite Sheet**. A pose whose PNG
+is missing shows a neutral placeholder box — there are no built-in frames,
+every sheet ships from disk (the shipped `sprites/duke/` is the CC0
+spaceman).
 
 **Font**: the editor renders with JetBrains Mono, embedded under
 `internal/fonts/assets` (SIL OFL 1.1, bundled with its license). One face

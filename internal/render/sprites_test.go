@@ -1,26 +1,12 @@
 package render
 
 import (
+	"image"
+	"image/color"
 	"testing"
 
 	"shooter/internal/agent"
 )
-
-func TestAllFramesParse(t *testing.T) {
-	for id := frameID(0); id < frameCount; id++ {
-		rows, ok := frameArt[id]
-		if !ok {
-			t.Fatalf("frame %d has no art", id)
-		}
-		img, err := parseFrame(rows)
-		if err != nil {
-			t.Fatalf("frame %d: %v", id, err)
-		}
-		if img.Bounds().Dx() != artW || img.Bounds().Dy() != artH {
-			t.Fatalf("frame %d bounds = %v", id, img.Bounds())
-		}
-	}
-}
 
 // TestSpriteGeometryMatchesAgent pins the art size to the agent's logical
 // sprite size through the font scale: art * Scale == SpriteW x SpriteH.
@@ -41,24 +27,6 @@ func TestSpriteGeometryMatchesAgent(t *testing.T) {
 // cellHForTest mirrors the runtime cell height: the art sheet at Scale.
 func cellHForTest() int { return artH * Scale }
 
-func TestFrameArtRejectsBadRows(t *testing.T) {
-	if _, err := parseFrame([]string{"too", "short"}); err == nil {
-		t.Fatal("parseFrame must reject wrong row counts")
-	}
-	bad := make([]string, artH)
-	for i := range bad {
-		bad[i] = "............" //12 dots
-	}
-	bad[0] = "............X" // 13 columns
-	if _, err := parseFrame(bad); err == nil {
-		t.Fatal("parseFrame must reject wrong column counts")
-	}
-	bad[0] = "....Z......." // unknown palette char
-	if _, err := parseFrame(bad); err == nil {
-		t.Fatal("parseFrame must reject unknown palette chars")
-	}
-}
-
 func TestPoseMapping(t *testing.T) {
 	s := &spriteSheet{}
 	cases := []struct {
@@ -73,7 +41,8 @@ func TestPoseMapping(t *testing.T) {
 		{agent.Snapshot{State: agent.StateAim}, frameAim, 0, 0},
 		{agent.Snapshot{State: agent.StateFire}, frameAim, 0, 0},
 		{agent.Snapshot{State: agent.StateRecoil}, frameAim, 1, 0},             // kick back (+x = his back)
-		{agent.Snapshot{State: agent.StateSlash, T: 0}, frameKatanaDraw, 0, 0}, // reaching for the sheath\n		{agent.Snapshot{State: agent.StateSlash, T: 0.2}, frameKatana, 0, 0},       // both hands on the hilt
+		{agent.Snapshot{State: agent.StateSlash, T: 0}, frameKatanaDraw, 0, 0}, // reaching for the sheath
+		{agent.Snapshot{State: agent.StateSlash, T: 0.2}, frameKatana, 0, 0},   // both hands on the hilt
 		{agent.Snapshot{State: agent.StateDrag}, frameKatana, 0, 0},            // hands, not gun
 		{agent.Snapshot{State: agent.StateWin}, frameWin, 0, -2},
 	}
@@ -86,45 +55,25 @@ func TestPoseMapping(t *testing.T) {
 	}
 }
 
-// TestWalkCycleAlternatesFeet pins the four-beat gait: contact A and
-// contact B must differ (lifted foot swaps sides) while the passing
-// frames reuse the legs-together pose.
-func TestWalkCycleAlternatesFeet(t *testing.T) {
-	same := func(a, b frameID) bool {
-		x, y := frameArt[a], frameArt[b]
-		if len(x) != len(y) {
-			return false
+// TestPlaceholderFillsMissingPoses pins the disk-loader contract: a pose
+// without a PNG gets the neutral placeholder box, never other art.
+func TestPlaceholderFillsMissingPoses(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.SetRGBA(x, y, color.RGBA{255, 0, 0, 255})
 		}
-		for i := range x {
-			if x[i] != y[i] {
-				return false
-			}
-		}
-		return true
 	}
-	if same(frameWalk0, frameWalk2) {
-		t.Fatal("walk0 and walk2 must differ: the lifted foot swaps sides")
+	// (The full disk-loading flow lives in render_test.go; this pins the
+	// placeholder itself.)
+	p := placeholderFrame()
+	if b := p.Bounds(); b.Dx() != artW || b.Dy() != artH {
+		t.Fatalf("placeholder bounds = %v, want %dx%d", b, artW, artH)
 	}
-	if !same(frameWalk1, frameWalk3) {
-		t.Fatal("walk1 and walk3 are the same passing pose")
+	if c := p.RGBAAt(artW/2, artH/2); c.A != 255 {
+		t.Fatalf("placeholder fill must be opaque, got %+v", c)
 	}
-	// The lifted foot has no sole under it on the contact frames.
-	if frameArt[frameWalk0][23] != ".kkkkkkk.........." {
-		t.Fatalf("walk0 sole row = %q", frameArt[frameWalk0][23])
-	}
-	if frameArt[frameWalk2][23] != "...........kkkkkkk" {
-		t.Fatalf("walk2 sole row = %q", frameArt[frameWalk2][23])
-	}
-}
-
-// TestMouthIsTwoDarkPixels pins the simple mouth: two dark pixels in one
-// straight row, in both the idle and victory frames.
-func TestMouthIsTwoDarkPixels(t *testing.T) {
-	const mouthRow = 7 // empty row + headRows[6] (idle and win line up)
-	if got := frameArt[frameIdle][mouthRow]; got != "..kssssskkkssssk.." {
-		t.Fatalf("idle mouth row = %q, want %q", got, "..kssssskkkssssk..")
-	}
-	if got := frameArt[frameWin][mouthRow]; got != "..kssssskkkssssk.." {
-		t.Fatalf("win mouth row = %q, want %q", got, "..kssssskkkssssk..")
+	if c := p.RGBAAt(0, 0); c.A == 0 {
+		t.Fatal("placeholder border must be visible")
 	}
 }

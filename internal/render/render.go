@@ -112,11 +112,15 @@ type Renderer struct {
 	particles []particle
 }
 
-// New builds the renderer from the embedded font. The grid cell size is
-// derived from the font metrics: cellW = advance, cellH = the sprite row
-// (artH*Scale), so glyphs sit centered in cells and the sprite fills a
-// row exactly.
+// New builds the renderer from the embedded font and the sprite sheets
+// under sprites/ (see newFromSheetDir).
 func New() (*Renderer, error) {
+	return newFromSheetDir(diskSheetDir)
+}
+
+// newFromSheetDir is New with an explicit sheet folder (tests point it
+// at temp dirs; the app always uses sprites/).
+func newFromSheetDir(base string) (*Renderer, error) {
 	src, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.JetBrainsMonoTTF))
 	if err != nil {
 		return nil, err
@@ -126,32 +130,28 @@ func New() (*Renderer, error) {
 	size := DefaultFontSize
 	bufFace := &text.GoTextFace{Source: src, Size: float64(size)}
 	bufM := bufFace.Metrics()
-	sheets := make(map[string]*spriteSheet)
-	for name, art := range allSheets {
-		s, err := newSpriteSheet(art)
-		if err != nil {
-			return nil, fmt.Errorf("sheet %q: %w", name, err)
-		}
-		sheets[name] = s
-	}
-	// User sheets from sprites/<name>/ override the same-named built-in
-	// and add brand-new ones (Settings > Sprite Sheet lists the result).
-	disk, err := loadDiskSheets()
+	// Sheets come from <base>/<name>/ pose PNGs (the shipped spaceman
+	// art lives there; the old built-in ASCII duke is gone).
+	sheets, err := loadDiskSheetsFrom(base)
 	if err != nil {
 		return nil, err
 	}
-	for name, s := range disk {
-		sheets[name] = s
-	}
 	if len(sheets) == 0 {
-		return nil, fmt.Errorf("no sprite sheets")
+		return nil, fmt.Errorf("no sprite sheets: add pose PNGs under sprites/<name>/")
+	}
+	active := defaultSheet
+	if _, ok := sheets[active]; !ok {
+		for name := range sheets { // first folder becomes the default
+			active = name
+			break
+		}
 	}
 	r := &Renderer{
 		fontSize: size,
 		bufFace:  bufFace,
 		bufLineH: int(math.Ceil(bufM.HAscent + bufM.HDescent)),
 		sheets:   sheets,
-		active:   defaultSheet,
+		active:   active,
 	}
 	r.rebuildLayout()
 	return r, nil

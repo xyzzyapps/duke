@@ -2,10 +2,8 @@ package render
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
-	"image/png"
 	"os"
 	"path/filepath"
 
@@ -13,9 +11,9 @@ import (
 )
 
 // frameNames maps a pose to its PNG file name inside a sprite folder.
-// A user sheet is sprites/<name>/<frame>.png; missing files fall back to
-// the built-in duke frame of the same pose, so swapping one PNG (say
-// idle.png) changes just that pose.
+// A sheet is sprites/<name>/<frame>.png; a missing PNG becomes a neutral
+// placeholder box so an incomplete sheet stays visible (the old built-in
+// duke art fallback is gone - every sheet comes from disk now).
 var frameNames = map[frameID]string{
 	frameIdle:       "idle",
 	frameWalk0:      "walk0",
@@ -36,7 +34,7 @@ var frameNames = map[frameID]string{
 const diskSheetDir = "sprites"
 
 // loadDiskSheets scans sprites/<name>/<frame>.png. Sheets are the folder
-// names; any pose whose PNG is missing uses the built-in duke frame.
+// names; any pose whose PNG is missing gets a placeholder box.
 func loadDiskSheets() (map[string]*spriteSheet, error) {
 	return loadDiskSheetsFrom(diskSheetDir)
 }
@@ -45,7 +43,7 @@ func loadDiskSheets() (map[string]*spriteSheet, error) {
 func loadDiskSheetsFrom(base string) (map[string]*spriteSheet, error) {
 	entries, err := os.ReadDir(base)
 	if err != nil {
-		return nil, nil // no folder: built-ins only
+		return nil, nil // no folder: no sheets (the game requires sprites/)
 	}
 	out := map[string]*spriteSheet{}
 	for _, e := range entries {
@@ -77,11 +75,7 @@ func loadDiskSheetsFrom(base string) (map[string]*spriteSheet, error) {
 				s.raw[id] = r
 				continue
 			}
-			f, err := parseFrame(frameArt[id]) // fall back to duke's pose
-			if err != nil {
-				return nil, err
-			}
-			s.raw[id] = f
+			s.raw[id] = placeholderFrame() // missing pose: visible box
 		}
 		out[name] = s
 	}
@@ -104,42 +98,19 @@ func resizeNearest(src image.Image, w, h int) *image.RGBA {
 	return dst
 }
 
-// ExportBuiltinSheets writes every built-in character sheet as editable
-// PNGs into base/<name>/<frame>.png, scaled 4x for easy pixel editing.
-// The game loads them back from the sprites/ folder (see loadDiskSheets);
-// cmd/gensprites regenerates them after an art change.
-func ExportBuiltinSheets(base string) error {
-	for sheetName, art := range allSheets {
-		dir := filepath.Join(base, sheetName)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-		for id := frameID(0); id < frameCount; id++ {
-			img, err := parseFrame(art[id])
-			if err != nil {
-				return fmt.Errorf("%s/%s: %w", sheetName, frameNames[id], err)
+// placeholderFrame is drawn for a pose whose PNG is missing from a sheet:
+// a plain bordered box, clearly "art missing" without pretending to be a
+// character.
+func placeholderFrame() *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, artW, artH))
+	for y := 0; y < artH; y++ {
+		for x := 0; x < artW; x++ {
+			c := color.RGBA{30, 36, 46, 255}
+			if x == 0 || y == 0 || x == artW-1 || y == artH-1 {
+				c = color.RGBA{201, 209, 217, 110}
 			}
-			big := image.NewRGBA(image.Rect(0, 0, artW*4, artH*4))
-			for y := 0; y < artH; y++ {
-				for x := 0; x < artW; x++ {
-					c := img.RGBAAt(x, y)
-					for dy := 0; dy < 4; dy++ {
-						for dx := 0; dx < 4; dx++ {
-							big.SetRGBA(x*4+dx, y*4+dy, c)
-						}
-					}
-				}
-			}
-			f, err := os.Create(filepath.Join(dir, frameNames[id]+".png"))
-			if err != nil {
-				return err
-			}
-			err = png.Encode(f, big)
-			f.Close()
-			if err != nil {
-				return err
-			}
+			img.SetRGBA(x, y, c)
 		}
 	}
-	return nil
+	return img
 }

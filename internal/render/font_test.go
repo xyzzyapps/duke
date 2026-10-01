@@ -110,7 +110,7 @@ func TestKatanaPivotStartsAtTheBackAndEndsInFront(t *testing.T) {
 }
 
 func TestSetFontSizeRebuildsTheGrid(t *testing.T) {
-	r, err := New()
+	r, err := newFromSheetDir(writeTempSheet(t, "duke"))
 	if err != nil {
 		t.Fatal(err)
 	}
