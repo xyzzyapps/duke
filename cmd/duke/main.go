@@ -16,6 +16,7 @@ import (
 	"image"
 	"image/png"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,6 +56,14 @@ type repeatKey struct {
 	firedDelay bool
 }
 
+// dragState tracks an in-progress scrollbar drag (left button on an
+// overlay bar): vertical tells whether the vertical or horizontal bar
+// was grabbed.
+type dragState struct {
+	held     bool
+	vertical bool
+}
+
 // watchedKeys are the keys that emit KeyPressed events, repeating while
 // held. Letters appear here too so Ctrl chords (Ctrl+S/O/Z/Y) repeat; the
 // editor ignores plain presses of those.
@@ -82,7 +91,8 @@ type game struct {
 	tabs      *ui.Tabs // shared tab strip
 	nc        *netCtl  // LAN controller (nil in solo play)
 	keys      map[ebiten.Key]*repeatKey
-	rightHeld float64 // held right-button accumulator (rapid fire)
+	rightHeld float64   // held right-button accumulator (rapid fire)
+	scroller  dragState // in-progress scrollbar drag
 	dump      string
 	frames    int
 	done      bool
@@ -212,23 +222,64 @@ func (g *game) collectInput(dt float64) {
 		}
 	}
 
-	// Mouse: left walks there, right shoots the clicked glyph.
+	// Mouse: left walks there, right shoots the clicked glyph. Clicks that
+	// land on the overlay scrollbars are swallowed here (the shell owns
+	// the camera) unless a dialog/menu/chat is open.
+	mx, my := ebiten.CursorPosition()
+	vZone, hZone := false, false
+	if g.editor.Dialog() == nil && g.editor.MenuState().Open == render.MenuNone &&
+		g.editor.ChatDraft() == nil {
+		vZone, hZone = g.rend.Layout().ScrollbarZones(mx, my, g.doc)
+	}
 	for _, btn := range []ebiten.MouseButton{ebiten.MouseButtonLeft, ebiten.MouseButtonRight} {
 		if inpututil.IsMouseButtonJustPressed(btn) {
-			x, y := ebiten.CursorPosition()
-			g.bus.Publish(events.MousePressed{X: x, Y: y, Button: btn})
+			if vZone || hZone {
+				continue // the scrollbar owns this press
+			}
+			g.bus.Publish(events.MousePressed{X: mx, Y: my, Button: btn})
 		}
 	}
+
+	// Scrollbar dragging: grabbing an overlay bar freezes that axis and
+	// follows the cursor; releasing returns the camera to the caret.
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && (vZone || hZone) {
+		if !g.scroller.held {
+			g.scroller.held = true
+			g.scroller.vertical = vZone
+			if vZone {
+				g.rend.Layout().LockScrollY()
+			} else {
+				g.rend.Layout().LockScrollX()
+			}
+		}
+	} else if g.scroller.held {
+		l := g.rend.Layout()
+		l.UnlockScrollY()
+		l.UnlockScrollX()
+		g.scroller.held = false
+	}
+	if g.scroller.held {
+		l := g.rend.Layout()
+		if g.scroller.vertical {
+			l.SetScrollYFrac(float64(my-l.OriginY)/float64(l.ViewH), g.doc)
+		} else {
+			l.SetScrollXFrac(float64(mx-l.OriginX)/float64(l.ViewW), g.doc)
+		}
+	}
+
 	// Holding the right button keeps firing at the cursor (rapid fire).
 	// The engine's cooldown paces the actual shots once the command
 	// queue is drained; this only reissues the click at the pistol's
 	// natural cadence so a held button reads as steady fire.
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-		g.rightHeld += dt
-		if g.rightHeld >= mouseFireRate {
+		if vZone || hZone {
 			g.rightHeld = 0
-			x, y := ebiten.CursorPosition()
-			g.bus.Publish(events.MousePressed{X: x, Y: y, Button: ebiten.MouseButtonRight})
+		} else {
+			g.rightHeld += dt
+			if g.rightHeld >= mouseFireRate {
+				g.rightHeld = 0
+				g.bus.Publish(events.MousePressed{X: mx, Y: my, Button: ebiten.MouseButtonRight})
+			}
 		}
 	} else {
 		g.rightHeld = 0
@@ -250,29 +301,36 @@ func savePNG(screen *ebiten.Image, path string) error {
 	return png.Encode(f, img)
 }
 
-// settingsFile stores the last sheet the player picked (working dir).
+// settingsFile stores the last sheet + font size the player picked (cwd).
 const settingsFile = "settings.json"
 
-// loadSheet restores the persisted character sheet, if any.
-func loadSheet(rend *render.Renderer) {
+// loadSettings restores the persisted player choices, if any.
+func loadSettings(rend *render.Renderer) {
 	b, err := os.ReadFile(settingsFile)
 	if err != nil {
 		return
 	}
 	var s struct {
-		Sheet string
+		Sheet    string
+		FontSize int
 	}
-	if json.Unmarshal(b, &s) != nil || s.Sheet == "" {
+	if json.Unmarshal(b, &s) != nil {
 		return
 	}
-	rend.SetSheet(s.Sheet)
+	if s.Sheet != "" {
+		rend.SetSheet(s.Sheet)
+	}
+	if s.FontSize != 0 {
+		rend.SetFontSize(s.FontSize)
+	}
 }
 
-// saveSheet persists the chosen sheet for the next launch.
-func saveSheet(name string) {
+// saveSettings persists the chosen sheet and font size for the next launch.
+func saveSettings(sheet string, fontSize int) {
 	b, err := json.Marshal(struct {
-		Sheet string
-	}{name})
+		Sheet    string
+		FontSize int
+	}{sheet, fontSize})
 	if err != nil {
 		return
 	}
@@ -312,7 +370,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("renderer: %v", err)
 	}
-	loadSheet(rend) // Settings > Sprite Sheet is persisted across runs
+	loadSettings(rend) // Settings > Sprite Sheet / Font Size persist across runs
 
 	var d doc.Document = doc.New()
 
@@ -391,7 +449,18 @@ func main() {
 			if !rend.SetSheet(name) {
 				return false
 			}
-			saveSheet(name)
+			saveSettings(name, rend.FontSize())
+			return true
+		},
+		FontSizes: func() ([]int, int) {
+			return rend.FontSizeList()
+		},
+		SetFontSize: func(size int) bool {
+			if !rend.SetFontSize(size) {
+				return false
+			}
+			engine.SetGrid(rend.Layout().Grid)
+			saveSettings(rend.ActiveSheet(), size)
 			return true
 		},
 		Tabs: tabs,
@@ -425,9 +494,18 @@ func main() {
 	})
 
 	w, h := rend.ScreenSize()
+	// Fit the window to the monitor: a window clamped by the OS gets
+	// black letterbox bars (the fixed canvas cannot stretch), so scale
+	// the initial size down, preserving the aspect. Window resizing is
+	// disabled afterwards - the pixel grid is fixed and letterboxing
+	// only ever reads as broken.
+	if m := ebiten.Monitor(); m != nil {
+		mw, mh := m.Size()
+		w, h = fitWindowToMonitor(w, h, mw, mh)
+	}
 	ebiten.SetWindowSize(w, h)
 	ebiten.SetWindowTitle("DUKE - gunman text editor [" + filepath.Base(path) + "]")
-	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeDisabled)
 	log.Printf("start: file=%s window=%dx%d", path, w, h)
 
 	runErr := ebiten.RunGame(g)
@@ -435,6 +513,30 @@ func main() {
 	if runErr != nil && !errors.Is(runErr, errDone) && !errors.Is(runErr, errQuit) {
 		log.Fatal(runErr)
 	}
+}
+
+// fitWindowToMonitor scales the canvas size (w, h) down, preserving the
+// aspect, so the window fits entirely on the screen with room for the
+// taskbar. Returns the input unchanged when it already fits.
+func fitWindowToMonitor(w, h, mw, mh int) (int, int) {
+	if mw <= 0 || mh <= 0 {
+		return w, h
+	}
+	const taskbarMargin = 96 // breathing room for the taskbar/dock
+	availH := mh - taskbarMargin
+	if availH <= 0 {
+		return w, h
+	}
+	scale := math.Min(float64(mw)/float64(w), float64(availH)/float64(h))
+	if scale >= 1 {
+		return w, h
+	}
+	fw := int(math.Round(float64(w) * scale))
+	fh := int(math.Round(float64(h) * scale))
+	if fw < 640 || fh < 480 {
+		return w, h // degenerate screen: keep the nominal size
+	}
+	return fw, fh
 }
 
 // openBrowser launches a URL in the platform browser. Uses only stock OS

@@ -343,3 +343,29 @@ and drags lines when you reorder them.
       forward) - no further changes
 - [x] Help dialog + README: instant typing, held right-click rapid fire
 - [ ] Final git commit (done when the session is marked)
+
+## Phase 28 - Session 21: same-row katana, 80x20 grid, font-size setting, scrollbars
+- [x] Katana only strikes a glyph ON the gunman's own row (target.Line ==
+      base.Line); cross-row targets and line joins are pistol work
+- [x] Grid is now 80 cols x 20 rows (one aspect, any font size): default
+      window 1440x1100 (was 80x16 @ 1440x908)
+- [x] Settings > Font Size: 18/24/30px (30 default); the single face is
+      rebuilt, cellW follows the advance (11/14/18), window resizes to
+      keep the 80x20 grid; document lines draw glyph-by-glyph so
+      fractional advances stay optically aligned to the cell lattice;
+      engine.SetGrid re-points the engine after a size change;
+      settings.json now persists {sheet, fontSize}
+- [x] Overlay scrollbars: translucent track+thumb on the right and bottom
+      viewport edges (only when the doc overflows); dragging freezes the
+      camera (Layout lock), follows the cursor, releases back to the
+      caret-follow; clicks landing on a bar are swallowed by the shell
+- [x] PgUp/PgDn use the live viewport row count (Layout.Rows() = 20)
+- [x] Tests: same-row katana (vertical target -> pistol, forward join ->
+      pistol), font-size grid rebuilds (880/1120/1440 wide), scrollbar
+      lock/zones/overflow gating, settings font-size click (191 total)
+- [x] README/SPEC/help/screenshot updated for the new geometry
+- [ ] Final git commit (done when the session is marked)
+- [x] Window fit: the canvas (e.g. 1440x1100) is scaled down, aspect
+      preserved, to fit the monitor work area at creation - no black
+      letterbox bars from OS clamping; window resizing disabled (fixed
+      pixel grid); pure fitWindowToMonitor helper + unit test

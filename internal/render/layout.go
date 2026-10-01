@@ -29,6 +29,52 @@ type Layout struct {
 	OriginX, OriginY int     // text viewport top-left on screen
 	ViewW, ViewH     int     // text viewport size
 	ScrollX, ScrollY float64 // camera: world pixel at the viewport's top-left
+	scrollLockX      bool    // scrollbar drag: follow() leaves ScrollX alone
+	scrollLockY      bool    // scrollbar drag: follow() leaves ScrollY alone
+}
+
+// Rows returns how many full text rows the viewport shows.
+func (l Layout) Rows() int { return l.ViewH / l.CellH }
+
+// Cols returns how many full text columns the viewport shows.
+func (l Layout) Cols() int { return l.ViewW / l.CellW }
+
+// LockScrollX freezes the horizontal camera (scrollbar dragging).
+func (l *Layout) LockScrollX() { l.scrollLockX = true }
+
+// UnlockScrollX resumes the caret-following camera.
+func (l *Layout) UnlockScrollX() { l.scrollLockX = false }
+
+// ScrollLockedX reports whether the horizontal camera is frozen.
+func (l *Layout) ScrollLockedX() bool { return l.scrollLockX }
+
+// SetScrollXFrac jumps the horizontal camera to a fraction of the widest
+// line (scrollbar thumb): 0 = left, 1 = right.
+func (l *Layout) SetScrollXFrac(frac float64, d doc.Document) {
+	docW := 0
+	for i := 0; i < d.LineCount(); i++ {
+		if w := d.RuneCount(i) * l.CellW; w > docW {
+			docW = w
+		}
+	}
+	maxX := max(0, docW-l.ViewW)
+	l.ScrollX = clamp(frac*float64(maxX), 0, float64(maxX))
+}
+
+// LockScrollY freezes the vertical camera (scrollbar dragging).
+func (l *Layout) LockScrollY() { l.scrollLockY = true }
+
+// UnlockScrollY resumes the caret-following camera.
+func (l *Layout) UnlockScrollY() { l.scrollLockY = false }
+
+// ScrollLockedY reports whether the vertical camera is frozen.
+func (l *Layout) ScrollLockedY() bool { return l.scrollLockY }
+
+// SetScrollYFrac jumps the vertical camera to a fraction of the document
+// height (scrollbar thumb): 0 = top, 1 = bottom.
+func (l *Layout) SetScrollYFrac(frac float64, d doc.Document) {
+	maxY := max(0, d.LineCount()*l.CellH-l.ViewH)
+	l.ScrollY = clamp(frac*float64(maxY), 0, float64(maxY))
 }
 
 // NewLayout builds the layout for a cols x rows text viewport with equal
@@ -68,19 +114,23 @@ func (l Layout) ScreenToCell(sx, sy int, d doc.Document) (doc.Pos, bool) {
 func (l *Layout) follow(cx, cy float64, d doc.Document, dt float64) {
 	const band = 0.3 // agent is kept within the middle 40% of the view
 
-	// Horizontal target.
+	// Horizontal target (skipped while a scrollbar drag locks the camera).
 	tx := l.ScrollX
-	if rel := cx - l.ScrollX; rel < float64(l.ViewW)*band {
-		tx = cx - float64(l.ViewW)*band
-	} else if rel > float64(l.ViewW)*(1-band) {
-		tx = cx - float64(l.ViewW)*(1-band)
+	if !l.scrollLockX {
+		if rel := cx - l.ScrollX; rel < float64(l.ViewW)*band {
+			tx = cx - float64(l.ViewW)*band
+		} else if rel > float64(l.ViewW)*(1-band) {
+			tx = cx - float64(l.ViewW)*(1-band)
+		}
 	}
-	// Vertical target.
+	// Vertical target (skipped while a scrollbar drag locks the camera).
 	ty := l.ScrollY
-	if rel := cy - l.ScrollY; rel < float64(l.ViewH)*band {
-		ty = cy - float64(l.ViewH)*band
-	} else if rel > float64(l.ViewH)*(1-band) {
-		ty = cy - float64(l.ViewH)*(1-band)
+	if !l.scrollLockY {
+		if rel := cy - l.ScrollY; rel < float64(l.ViewH)*band {
+			ty = cy - float64(l.ViewH)*band
+		} else if rel > float64(l.ViewH)*(1-band) {
+			ty = cy - float64(l.ViewH)*(1-band)
+		}
 	}
 
 	// Clamp against the document bounds (never scroll into the void).

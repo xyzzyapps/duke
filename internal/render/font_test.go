@@ -108,3 +108,46 @@ func TestKatanaPivotStartsAtTheBackAndEndsInFront(t *testing.T) {
 		t.Fatalf("pivot must slide forward: %v -> %v", p0, p1)
 	}
 }
+
+func TestSetFontSizeRebuildsTheGrid(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FontSize() != DefaultFontSize {
+		t.Fatalf("default size = %d, want %d", r.FontSize(), DefaultFontSize)
+	}
+	if r.Layout().Rows() != 20 || r.Layout().Cols() != 80 {
+		t.Fatalf("default grid = %dx%d cells, want 80x20", r.Layout().Cols(), r.Layout().Rows())
+	}
+	if r.Layout().ScreenW != 1440 || r.Layout().ScreenH != 1100 {
+		t.Fatalf("default window = %dx%d, want 1440x1100", r.Layout().ScreenW, r.Layout().ScreenH)
+	}
+	// 18px: advance 10.8 -> cellW 11, window 880 wide; rows stay 20.
+	if !r.SetFontSize(18) {
+		t.Fatal("size 18 rejected")
+	}
+	if r.Layout().CellW != 11 || r.Layout().ScreenW != 880 {
+		t.Fatalf("18px grid cellW = %d (window %d), want 11 (880)", r.Layout().CellW, r.Layout().ScreenW)
+	}
+	if r.Layout().Rows() != 20 || r.Layout().ScreenH != 1100 {
+		t.Fatalf("18px rows/window height = %d/%d, want 20/1100", r.Layout().Rows(), r.Layout().ScreenH)
+	}
+	// 24px: advance 14.4 -> cellW 14.
+	if !r.SetFontSize(24) {
+		t.Fatal("size 24 rejected")
+	}
+	if r.Layout().CellW != 14 || r.Layout().ScreenW != 1120 {
+		t.Fatalf("24px grid cellW = %d (window %d), want 14 (1120)", r.Layout().CellW, r.Layout().ScreenW)
+	}
+	// Invalid sizes are rejected; back to 30 restores 1440.
+	if r.SetFontSize(99) {
+		t.Fatal("size 99 must be rejected")
+	}
+	if !r.SetFontSize(30) || r.Layout().ScreenW != 1440 {
+		t.Fatal("back to 30 must restore the 1440px window")
+	}
+	if got, cur := r.FontSizeList(); len(got) != 3 || cur != 30 {
+		t.Fatalf("FontSizeList = %v/%d, want [18 24 30]/30", got, cur)
+	}
+}

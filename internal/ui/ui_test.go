@@ -47,12 +47,13 @@ func (m *mockEngine) WalkTo(p doc.Pos) {
 	m.caret = p
 	m.walks = append(m.walks, p)
 }
-func (m *mockEngine) Step(dir int)     { m.steps = append(m.steps, dir) }
-func (m *mockEngine) MoveLine(dir int) { m.moves = append(m.moves, dir) }
-func (m *mockEngine) Undo()            { m.undos++ }
-func (m *mockEngine) Redo()            { m.redos++ }
-func (m *mockEngine) Celebrate()       { m.wins++ }
-func (m *mockEngine) Cancel()          { m.cancels++ }
+func (m *mockEngine) Step(dir int)        { m.steps = append(m.steps, dir) }
+func (m *mockEngine) SetGrid(g grid.Grid) {} // font-size switch: ignored by the mock
+func (m *mockEngine) MoveLine(dir int)    { m.moves = append(m.moves, dir) }
+func (m *mockEngine) Undo()               { m.undos++ }
+func (m *mockEngine) Redo()               { m.redos++ }
+func (m *mockEngine) Celebrate()          { m.wins++ }
+func (m *mockEngine) Cancel()             { m.cancels++ }
 func (m *mockEngine) SwapDocument(d doc.Document, caret doc.Pos) {
 	m.caret = caret
 	m.swapped = append(m.swapped, d)
@@ -90,12 +91,13 @@ func (f *fakeStore) Write(path, content string) error {
 
 // harness wires a real doc/bus/layout with the mock engine and fake store.
 type harness struct {
-	doc      *doc.Buffer
-	engine   *mockEngine
-	store    *fakeStore
-	bus      events.Bus
-	editor   *Editor
-	setCalls []string // sheet names passed to SetSheet
+	doc       *doc.Buffer
+	engine    *mockEngine
+	store     *fakeStore
+	bus       events.Bus
+	editor    *Editor
+	setCalls  []string // sheet names passed to SetSheet
+	sizeCalls []int    // sizes passed to SetFontSize
 }
 
 func newHarness(text string) *harness {
@@ -118,6 +120,11 @@ func newHarness(text string) *harness {
 		Sheets: func() ([]string, string) { return []string{"duke"}, "duke" },
 		SetSheet: func(name string) bool {
 			h.setCalls = append(h.setCalls, name)
+			return true
+		},
+		FontSizes: func() ([]int, int) { return []int{18, 24, 30}, 30 },
+		SetFontSize: func(size int) bool {
+			h.sizeCalls = append(h.sizeCalls, size)
 			return true
 		},
 	})
@@ -940,6 +947,41 @@ func TestSettingsMenuOpensSheetDialog(t *testing.T) {
 	}
 	if !strings.Contains(dlg.Lines[0], "*") {
 		t.Fatalf("active sheet not marked: %q", dlg.Lines[0])
+	}
+	// The font-size section follows the sheets.
+	if !strings.Contains(joined, "FONT SIZE") {
+		t.Fatalf("dialog lines = %q, want FONT SIZE section", joined)
+	}
+	if !strings.Contains(joined, "30  *") {
+		t.Fatalf("dialog lines = %q, want the active size marked", joined)
+	}
+}
+
+func TestSettingsClickSwitchesFontSize(t *testing.T) {
+	h := newHarness("hi")
+	clickCenter(h, render.SettingsBtn)
+	clickCenter(h, render.DropRects(render.SettingsBtn, render.SettingsMenuItems)[0])
+	dlg := h.editor.Dialog()
+	if dlg == nil {
+		t.Fatal("dialog missing")
+	}
+	// Lines: [duke, "", "FONT SIZE", "18", "24", "30  *"] -> 24 is index 4.
+	rc, ok := render.DialogLineRect(h.editor.svc.Layout.ScreenW, h.editor.svc.Layout.ScreenH, *dlg, 4)
+	if !ok {
+		t.Fatal("no line rect for the 24 size row")
+	}
+	clickCenter(h, rc)
+	if len(h.sizeCalls) != 1 || h.sizeCalls[0] != 24 {
+		t.Fatalf("sizeCalls = %v, want [24]", h.sizeCalls)
+	}
+	if len(h.setCalls) != 0 {
+		t.Fatalf("sheet must not change on a size click: %v", h.setCalls)
+	}
+	if h.editor.Settings {
+		t.Fatal("dialog should close after picking a size")
+	}
+	if !strings.Contains(h.engine.Status(), "FONT SIZE") {
+		t.Fatalf("status = %q, want font size notice", h.engine.Status())
 	}
 }
 

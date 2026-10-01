@@ -1,17 +1,18 @@
 package render
 
 import (
-	"shooter/internal/actions"
+	"strings"
 	"testing"
 
+	"shooter/internal/actions"
 	"shooter/internal/doc"
 	"shooter/internal/grid"
 )
 
-// testLayout mirrors the runtime geometry (18x48 cells, 80x16 viewport,
+// testLayout mirrors the runtime geometry (18x48 cells, the 80x20 grid,
 // 48px HUD bars at the shared GUI face size, 44px tab strip).
 func testLayout() Layout {
-	return NewLayout(grid.Grid{CellW: 18, CellH: 48}, 80, 16, 48)
+	return NewLayout(grid.Grid{CellW: 18, CellH: 48}, 80, 20, 48)
 }
 
 func TestNewLayoutGeometry(t *testing.T) {
@@ -19,11 +20,11 @@ func TestNewLayoutGeometry(t *testing.T) {
 	if l.ScreenW != 1440 {
 		t.Fatalf("ScreenW = %d, want 1440", l.ScreenW)
 	}
-	if l.ScreenH != 908 { // 16*48 + 2*48 bars + 44 tab strip
-		t.Fatalf("ScreenH = %d, want 908", l.ScreenH)
+	if l.ScreenH != 1100 { // 20*48 + 2*48 bars + 44 tab strip
+		t.Fatalf("ScreenH = %d, want 1100", l.ScreenH)
 	}
-	if l.OriginY != 92 || l.ViewW != 1440 || l.ViewH != 768 {
-		t.Fatalf("origin/view = %d %d %d (want origin 92)", l.OriginY, l.ViewW, l.ViewH)
+	if l.OriginY != 92 || l.ViewW != 1440 || l.ViewH != 960 {
+		t.Fatalf("origin/view = %d %d %d (want origin 92, view 1440x960)", l.OriginY, l.ViewW, l.ViewH)
 	}
 }
 
@@ -97,10 +98,10 @@ func TestScreenToCellHonoursScroll(t *testing.T) {
 func TestFollowKeepsAgentInMiddleBand(t *testing.T) {
 	l := testLayout()
 	d := doc.New()
-	// A tall document so scrolling is possible.
-	d.Load("line\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline")
+	// A tall document so scrolling is possible (30 rows > the 20-row view).
+	d.Load(strings.Repeat("line\n", 30))
 	// Agent near the bottom: camera must move down but clamp to bounds.
-	l.follow(60, 19*48+16, d, 1.0)
+	l.follow(60, 29*48+16, d, 1.0)
 	if l.ScrollY <= 0 {
 		t.Fatalf("ScrollY = %v, should have followed down", l.ScrollY)
 	}
@@ -184,5 +185,86 @@ func TestTabTitleTruncates(t *testing.T) {
 	}
 	if got := TabTitle("a-very-long-filename-above-18.txt"); len(got) > 18 {
 		t.Fatalf("TabTitle long = %q (%d)", got, len(got))
+	}
+}
+
+func TestLayoutRowsAndColsAccessors(t *testing.T) {
+	l := testLayout()
+	if l.Rows() != 20 || l.Cols() != 80 {
+		t.Fatalf("Rows/Cols = %d/%d, want 20/80", l.Rows(), l.Cols())
+	}
+}
+
+func TestScrollbarLockFreezesTheCamera(t *testing.T) {
+	l := testLayout()
+	d := doc.New()
+	d.Load(strings.Repeat("row\n", 40)) // 40*48 = 1920 > 960 viewport
+	l.follow(60, 39*48+16, d, 1.0)
+	if l.ScrollY <= 0 {
+		t.Fatal("camera should have followed the caret")
+	}
+	// Lock: the caret may move anywhere, the vertical camera stays put.
+	l.LockScrollY()
+	before := l.ScrollY
+	l.follow(60, 0, d, 1.0)
+	l.follow(60, 0, d, 1.0)
+	if l.ScrollY != before {
+		t.Fatalf("locked camera moved: %v -> %v", before, l.ScrollY)
+	}
+	// The thumb jump sets a fraction of the document height (0 = top,
+	// 1 = bottom).
+	l.SetScrollYFrac(0, d)
+	if l.ScrollY != 0 {
+		t.Fatalf("top frac = %v, want 0", l.ScrollY)
+	}
+	maxY := float64(d.LineCount()*l.CellH - l.ViewH)
+	l.SetScrollYFrac(1, d)
+	if l.ScrollY < maxY-1 || l.ScrollY > maxY+1 {
+		t.Fatalf("bottom frac = %v, want ~%v", l.ScrollY, maxY)
+	}
+	// Unlock: the caret-follow resumes.
+	l.UnlockScrollY()
+	l.follow(60, 0, d, 1.0)
+	l.follow(60, 0, d, 1.0)
+	if l.ScrollY != 0 {
+		t.Fatalf("camera did not resume after unlock: %v", l.ScrollY)
+	}
+}
+
+func TestScrollbarZonesOnlyWhenOverflowing(t *testing.T) {
+	l := testLayout()
+	small := doc.New()
+	small.Load("hi")
+	if v, h := l.ScrollbarZones(l.OriginX+l.ViewW-1, l.OriginY+24, small); v || h {
+		t.Fatalf("short doc exposes scrollbar zones: v=%v h=%v", v, h)
+	}
+	tall := doc.New()
+	tall.Load(strings.Repeat("row\n", 40))
+	v, _ := l.ScrollbarZones(l.OriginX+l.ViewW-1, l.OriginY+24, tall)
+	if !v {
+		t.Fatal("tall doc must expose the vertical zone")
+	}
+	if _, h := l.ScrollbarZones(l.OriginX+l.ViewW-1, l.OriginY+24, tall); h {
+		t.Fatal("vertical zone only: column overflow absent")
+	}
+	wide := doc.New()
+	wide.Load("x" + strings.Repeat("y", 200))
+	_, h := l.ScrollbarZones(l.OriginX+30, l.OriginY+l.ViewH-1, wide)
+	if !h {
+		t.Fatal("wide doc must expose the horizontal zone")
+	}
+	// Mid-viewport clicks are never scrollbar clicks.
+	if v, h := l.ScrollbarZones(l.OriginX+l.ViewW/2, l.OriginY+l.ViewH/2, tall); v || h {
+		t.Fatalf("viewport centre is scrollbar zone: v=%v h=%v", v, h)
+	}
+}
+
+func TestScrollbarZonesRespectTheHudBars(t *testing.T) {
+	l := testLayout()
+	tall := doc.New()
+	tall.Load(strings.Repeat("row\n", 40))
+	// Above the viewport (inside the tab strip area) is not a zone.
+	if v, _ := l.ScrollbarZones(l.OriginX+l.ViewW-1, l.OriginY-1, tall); v {
+		t.Fatal("the bar above the viewport must not be scrollbar territory")
 	}
 }

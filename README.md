@@ -14,8 +14,8 @@ Built with Go and [Ebitengine](https://ebitengine.org): everything is
 procedural — an embedded **JetBrains Mono** TrueType font (OFL 1.1, UTF-8: accents, Greek,
 Cyrillic and more render natively; CJK falls back to placeholder boxes) and
 fully procedural pixel-art sprites drawn at 2x (18x24 art pixels become
-36x48 screen pixels - the same sprite size, with real detail; window
-1440x860).
+36x48 screen pixels). The window keeps an **80x20 cell grid** at any font
+size (1440x1100 at the default 30px face).
 
 ## Controls
 
@@ -31,6 +31,8 @@ fully procedural pixel-art sprites drawn at 2x (18x24 art pixels become
 | `Ctrl+A` / `Ctrl+E` | emacs: teleport to start / end of line |
 | `Enter` / `Tab` | split the line / insert 4 spaces |
 | arrows | first press turns that way, next presses walk him — he *is* the caret (Home/End/PgUp/PgDn walk directly; right-click attacks a glyph directly, holding it rapid-fires) |
+| scrollbars | drag the overlay bars on the right/bottom edges to pan the camera |
+| `Settings` menu | pick the **sprite sheet** (drop PNG folders into `sprites/`) or the **font size** (18/24/30px keeps the 80x20 grid) |
 | left-click | walk there |
 | `Ctrl+Up` / `Ctrl+Down` | grabs the current line with his hands and drags it past its neighbour |
 | `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` | undo / redo (offline only in multiplayer) |
@@ -77,8 +79,9 @@ change; the ASCII art in `internal/render/sprites.go` is the fallback
 source when a folder or pose is absent.
 
 **Font**: the editor renders with JetBrains Mono, embedded under
-`internal/fonts/assets` (SIL OFL 1.1, bundled with its license); a 30px
-document face + 16px chrome face keep every glyph exactly one cell wide.
+`internal/fonts/assets` (SIL OFL 1.1, bundled with its license). One face
+serves the document AND the chrome (30px default); **Settings ▸ Font
+Size** offers 18/24/30px and the window resizes to keep the 80x20 grid.
 
 ## Tabs
 

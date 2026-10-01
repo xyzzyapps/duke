@@ -68,6 +68,9 @@ type Engine interface {
 	KillLine(back bool)
 	// WalkTo queues a walk to a buffer position; the caret moves there.
 	WalkTo(p doc.Pos)
+	// SetGrid re-points the engine at a new cell grid. The shell calls
+	// this when the font size changes (the renderer rebuilds the layout).
+	SetGrid(g grid.Grid)
 	// Step moves the gunman one cell left (-1)/right (+1); the first press
 	// in a new direction turns him, the next press walks (turn-first).
 	Step(dir int)
@@ -332,6 +335,9 @@ func (e *engine) WalkTo(p doc.Pos) {
 	x, y := e.g.AgentOrigin(e.caret, agent.SpriteH)
 	e.ag.WalkTo(x, y)
 }
+
+// SetGrid implements Engine (font size changes rebuild the layout).
+func (e *engine) SetGrid(g grid.Grid) { e.g = g }
 
 // MoveLine implements Engine.
 func (e *engine) MoveLine(dir int) {
@@ -611,7 +617,10 @@ func (e *engine) startShoot(c cmd) {
 		e.cooldown = failCooldown
 		return
 	}
-	melee := reach(target, base) <= katanaReach
+	// The katana only strikes a glyph ON the gunman's own row; targets on
+	// other lines (including line joins across rows) are pistol work.
+	sameLine := target.Line == base.Line
+	melee := sameLine && reach(target, base) <= katanaReach
 	// Orientation reflects the strike direction. Caret-derived shots
 	// (backspace/delete) strike the way the turn-first model faces him:
 	// back = left, forward = right. Explicit targets (right-click) face

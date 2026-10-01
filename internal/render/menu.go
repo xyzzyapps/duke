@@ -118,10 +118,12 @@ func HelpLines() []string {
 		"ctrl + k ............ ROCKET LAUNCHER: kill line (emacs)",
 		"ctrl + u ............ rocket: kill back to line start (shell)",
 		"arrows .............. first press turns that way, next presses walk him",
+		"scrollbars .......... drag the edge bars to pan the camera",
 		"ctrl + up / down .... grabs the line with his hands and drags it",
 		"ctrl + z / ctrl + y . undo / redo",
 		"ctrl + s ............ save    ctrl + o: reload",
 		"sound button (top bar)  toggles mute",
+		"settings menu ........ sprite sheet + font size (18/24/30)",
 		"file menu (top bar) . new / save / close    help menu: this + about",
 		"F1 / esc ............ open or close this dialog",
 	}

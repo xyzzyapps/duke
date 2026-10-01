@@ -23,10 +23,17 @@ import (
 // Screen geometry (see package docs for how the numbers relate).
 const (
 	Scale = 2  // art-pixel scale: the 18x24 sprite becomes 36x48 screen px
-	Cols  = 80 // text viewport columns
-	Rows  = 16 // text viewport rows
+	Cols  = 80 // text viewport columns (80x20 grid keeps one aspect)
+	Rows  = 20 // text viewport rows
 	BarH  = 48 // height of each HUD bar (one line of the shared GUI face)
 )
+
+// FontSizes are the selectable document/GUI font sizes (Settings dialog).
+// The chrome is sized for the 30px face, so every offered size is <= 30px.
+var FontSizes = []int{18, 24, 30}
+
+// DefaultFontSize is the face used at launch (matches the original look).
+const DefaultFontSize = 30
 
 // Palette: a dark DOS-terminal look.
 var (
@@ -53,7 +60,13 @@ var (
 	colTitleBar  = color.RGBA{44, 78, 120, 255}
 	colStrip     = color.RGBA{17, 21, 27, 255}
 	colBarText   = color.RGBA{235, 240, 246, 255}
+	// scrollbar overlays
+	colScrollTrack = color.RGBA{255, 255, 255, 26}
+	colScrollThumb = color.RGBA{255, 255, 255, 92}
 )
+
+// ScrollbarW is the overlay scrollbar thickness in screen pixels.
+const ScrollbarW = 10
 
 // HUD carries the chrome information the renderer needs each frame.
 type HUD struct {
@@ -89,41 +102,28 @@ type Bubble struct {
 
 // Renderer owns the layout, sprite sheet and particle system.
 type Renderer struct {
-	bufFace   text.Face               // document glyphs: sized so one advance == cellW
-	hudFace   text.Face               // chrome glyphs (menus, dialogs, status, tabs)
-	bufLineH  int                     // ceil of the document face line height (px)
-	hudLineH  int                     // ceil of the chrome face line height (px)
+	bufFace   text.Face               // one face for everything: document + chrome
+	bufLineH  int                     // ceil of the face line height (px)
+	fontSize  int                     // active face size (see FontSizes)
 	sheets    map[string]*spriteSheet // selectable character sheets
 	active    string                  // current sheet name (see SheetNames)
 	layout    Layout
 	particles []particle
 }
 
-// New builds the renderer from the embedded bitmap font. The grid cell size
-// is derived from the font metrics: cellW = advance*Scale and
-// cellH = (ascent+descent)*Scale, so every glyph exactly fills a cell.
+// New builds the renderer from the embedded font. The grid cell size is
+// derived from the font metrics: cellW = advance, cellH = the sprite row
+// (artH*Scale), so glyphs sit centered in cells and the sprite fills a
+// row exactly.
 func New() (*Renderer, error) {
 	src, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.JetBrainsMonoTTF))
 	if err != nil {
 		return nil, err
 	}
-	// The document face is the grid master: JetBrains Mono advances 0.6em,
-	// so a 30px face makes every glyph advance exactly cellW
-	// (artW/2*Scale = 18px) and columns stay aligned no matter how wide
-	// the runes are. The chrome face is a fixed 16px for the HUD, menus
-	// and dialogs.
 	// One face everywhere: document, HUD bars, menus, dialogs and tabs
 	// all share the same size (the user asked for uniform GUI type).
-	bufFace := &text.GoTextFace{Source: src, Size: 30}
-	cellW := int(math.Round(text.Advance("M", bufFace)))
-	if cellW != artW/2*Scale { // defensive: force the monospace advance
-		bufFace.Size = 3 * float64(artW)
-		cellW = int(math.Round(text.Advance("M", bufFace)))
-	}
-	cellH := artH * Scale // the sprite fills exactly one layout row
-	if cellW <= 0 {
-		cellW = artW / 2 * Scale
-	}
+	size := DefaultFontSize
+	bufFace := &text.GoTextFace{Source: src, Size: float64(size)}
 	bufM := bufFace.Metrics()
 	sheets := make(map[string]*spriteSheet)
 	for name, art := range allSheets {
@@ -145,14 +145,69 @@ func New() (*Renderer, error) {
 	if len(sheets) == 0 {
 		return nil, fmt.Errorf("no sprite sheets")
 	}
-	return &Renderer{
+	r := &Renderer{
+		fontSize: size,
 		bufFace:  bufFace,
 		bufLineH: int(math.Ceil(bufM.HAscent + bufM.HDescent)),
 		sheets:   sheets,
 		active:   defaultSheet,
-		layout:   NewLayout(grid.Grid{CellW: cellW, CellH: cellH}, Cols, Rows, BarH),
-	}, nil
+	}
+	r.rebuildLayout()
+	return r, nil
 }
+
+// SetFontSize switches the single GUI/document face (Settings > Font
+// Size). Only the sizes in FontSizes are accepted. The layout is rebuilt
+// so the window still shows Cols x Rows cells; the engine grid must be
+// refreshed from Layout().Grid afterwards (the shell does that).
+func (r *Renderer) SetFontSize(size int) bool {
+	ok := false
+	for _, s := range FontSizes {
+		if s == size {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return false
+	}
+	if size == r.fontSize {
+		return true // already active: nothing to do
+	}
+	src, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.JetBrainsMonoTTF))
+	if err != nil {
+		return false
+	}
+	r.fontSize = size
+	r.bufFace = &text.GoTextFace{Source: src, Size: float64(size)}
+	bufM := r.bufFace.Metrics()
+	r.bufLineH = int(math.Ceil(bufM.HAscent + bufM.HDescent))
+	r.rebuildLayout()
+	return true
+}
+
+// FontSizeList returns the selectable sizes and the active one.
+func (r *Renderer) FontSizeList() ([]int, int) {
+	return FontSizes, r.fontSize
+}
+
+// FontSize returns the active face size.
+func (r *Renderer) FontSize() int { return r.fontSize }
+
+// rebuildLayout recreates the camera layout from the current face size.
+// Rows are art-pixel locked (the sprite fills one row): cellH never
+// changes; cellW follows the face advance so the window keeps showing
+// exactly Cols columns.
+func (r *Renderer) rebuildLayout() {
+	cellW := int(math.Round(text.Advance("M", r.bufFace)))
+	if cellW <= 0 {
+		cellW = artW / 2 * Scale
+	}
+	r.layout = NewLayout(grid.Grid{CellW: cellW, CellH: artH * Scale}, Cols, Rows, BarH)
+}
+
+// CellW is the current grid cell width (the font advance, rounded).
+func (r *Renderer) CellW() int { return r.layout.CellW }
 
 // Layout returns the live layout (camera included) for click mapping.
 func (r *Renderer) Layout() *Layout { return &r.layout }
@@ -226,7 +281,7 @@ func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hu
 			swapOffset(line, v.Swaps, l.CellH)
 		// Glyphs are shorter than the cell, so centre each line vertically.
 		y += float64((l.CellH - r.bufLineH) / 2)
-		r.drawText(screen, d.Line(line), float64(l.OriginX)-l.ScrollX, y, colText)
+		r.drawDocLine(screen, d.Line(line), float64(l.OriginX)-l.ScrollX, y, colText)
 	}
 
 	// World entities, converted to screen space (the gunman covers his
@@ -256,6 +311,7 @@ func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hu
 	if hud.Dialog != nil {
 		r.drawDialog(screen, *hud.Dialog)
 	}
+	r.drawScrollbars(screen, d)
 }
 
 // swapOffset returns the vertical pixel offset for a row that is taking
@@ -562,6 +618,76 @@ func (r *Renderer) drawDialog(screen *ebiten.Image, d Dialog) {
 			col = colStatus // highlight the support line and the link
 		}
 		r.drawText(screen, l, float64(x+pad), float64(y+titleH+i*lineH), col)
+	}
+}
+
+// drawDocLine renders one buffer line rune by rune so every glyph is
+// optically centred in its grid cell. At the non-default font sizes the
+// monospace advance is fractional (e.g. 10.8px at 18px), and centering
+// keeps columns on the cell lattice instead of drifting.
+func (r *Renderer) drawDocLine(screen *ebiten.Image, s string, x, y float64, col color.Color) {
+	cellW := float64(r.layout.CellW)
+	for _, ch := range s {
+		w := text.Advance(string(ch), r.bufFace)
+		r.drawText(screen, string(ch), x+(cellW-w)/2, y, col)
+		x += cellW
+	}
+}
+
+// ScrollbarZones reports whether (sx, sy) lies on the overlay scrollbar
+// tracks (vertical = right edge, horizontal = bottom edge of the viewport).
+// Bars only exist when the document overflows its viewport, so a short
+// document never swallows clicks on the edges. The shell uses this to
+// grab the bars and to swallow clicks there.
+func (l Layout) ScrollbarZones(sx, sy int, d doc.Document) (vZone, hZone bool) {
+	docH := d.LineCount() * l.CellH
+	docW := 0
+	for i := 0; i < d.LineCount(); i++ {
+		if w := d.RuneCount(i) * l.CellW; w > docW {
+			docW = w
+		}
+	}
+	if docH > l.ViewH {
+		vZone = sx >= l.OriginX+l.ViewW-ScrollbarW && sx < l.OriginX+l.ViewW &&
+			sy >= l.OriginY && sy < l.OriginY+l.ViewH
+	}
+	if docW > l.ViewW {
+		hZone = sy >= l.OriginY+l.ViewH-ScrollbarW && sy < l.OriginY+l.ViewH &&
+			sx >= l.OriginX && sx < l.OriginX+l.ViewW
+	}
+	return
+}
+
+// drawScrollbars overlays translucent track+thumb bars on the right and
+// bottom edges of the text viewport when the document overflows. The
+// thumb position mirrors the camera; the shell drives it by locking the
+// camera and calling SetScrollYFrac while dragging.
+func (r *Renderer) drawScrollbars(screen *ebiten.Image, d doc.Document) {
+	l := r.layout
+	docH := d.LineCount() * l.CellH
+	if docH > l.ViewH { // vertical bar
+		x := float32(l.OriginX + l.ViewW - ScrollbarW)
+		vector.DrawFilledRect(screen, x, float32(l.OriginY), ScrollbarW, float32(l.ViewH), colScrollTrack, false)
+		thumbH := float32(max(ScrollbarW*3, l.ViewH*l.ViewH/docH))
+		maxY := float64(docH - l.ViewH)
+		frac := clamp(l.ScrollY/maxY, 0, 1)
+		ty := float32(l.OriginY) + float32(frac)*(float32(l.ViewH)-thumbH)
+		vector.DrawFilledRect(screen, x, ty, ScrollbarW, thumbH, colScrollThumb, false)
+	}
+	docW := 0
+	for i := 0; i < d.LineCount(); i++ {
+		if w := d.RuneCount(i) * l.CellW; w > docW {
+			docW = w
+		}
+	}
+	if docW > l.ViewW { // horizontal bar
+		y := float32(l.OriginY + l.ViewH - ScrollbarW)
+		vector.DrawFilledRect(screen, float32(l.OriginX), y, float32(l.ViewW), ScrollbarW, colScrollTrack, false)
+		thumbW := float32(max(ScrollbarW*3, l.ViewW*l.ViewW/docW))
+		maxX := float64(docW - l.ViewW)
+		frac := clamp(l.ScrollX/maxX, 0, 1)
+		tx := float32(l.OriginX) + float32(frac)*(float32(l.ViewW)-thumbW)
+		vector.DrawFilledRect(screen, tx, y, thumbW, ScrollbarW, colScrollThumb, false)
 	}
 }
 

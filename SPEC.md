@@ -133,20 +133,21 @@ scales the fixed 960x576 surface):
 2. **World pixels** — the document grid: `x = col*CellW`, `y = line*CellH`.
    Where the gunman walks and bullets fly.
 3. **Screen pixels** — `world - camera + viewport origin`.
-   `Layout.ScrollX/ScrollY` is the camera; `OriginY = 32` (top HUD bar).
+   `Layout.ScrollX/ScrollY` is the camera; `OriginY = 92` (48px top bar +
+   44px tab strip).
 
-Grid derivation (measured from `bitmapfont.Face` at startup):
+Grid derivation (from the embedded JetBrains Mono face at launch):
 
 ```
-advance("M") = 6px, HAscent = 12, HDescent = 4      (bitmapfont, 1x)
-Scale        = 2                                    (font pixel scale)
-CellW        = 6 * 2   = 12px     cellH = (12+4) * 2 = 32px
-viewport     = 80 cols x 16 rows  = 960 x 512
-window       = 960 x (512 + 2*32 HUD bars) = 960 x 576
-sprite art   = 12 x 16px, drawn at Scale 2 -> 24 x 32px on screen:
-               exactly one row tall (feet on the row's bottom edge, the
-               head never clips under the HUD), two cells wide, and its
-               pixels are the same size as the font's pixels
+JetBrains Mono advances 0.6em:  at 30px  advance = 18px
+Face = 30px (default; Settings allows 18/24/30, cellW 11/14/18)
+CellW    = round(advance)      cellH = artH * Scale = 48px (sprite-locked)
+viewport = 80 cols x 20 rows   (any font size keeps this 80:20 grid)
+window   = 80*CellW x (20*48 + 92 chrome)   = 1440 x 1100 at 30px
+sprite art = 18 x 24px, drawn at Scale 2 -> 36 x 48px on screen:
+             exactly one row tall (feet on the row's bottom edge, the
+             head never clips under the HUD), two cells wide, and its
+             pixels are the same size as the font's pixels
 ```
 
 **Why it matters:** the gunman is *big* (double the original v1 sprite)
@@ -229,8 +230,11 @@ the sole row, pinned by a test.
 Every attack freezes a `pendingShot{base, target, aim, from, to,
 weapon, ...}` when it starts. Regular shots pick the weapon by Chebyshev
 distance from the caret (base) to the target: `<= katanaReach` (4 cells)
-= **katana** (`Slash`, drawn from the back sheath, connects on `EvSlash`, no projectile); farther =
-**machine gun** (`AimWith(Pistol)` — the enum/asset keep the name `pistol`, the art is an SMG — spawns on `EvFired`). `ShootWord` always
+**and on the same row** (`target.Line == base.Line` — the blade never
+crosses rows; line joins are pistol work) = **katana** (`Slash`, drawn
+from the back sheath, connects on `EvSlash`, no projectile); farther or
+cross-row = **machine gun** (`AimWith(Pistol)` — the enum/asset keep the
+name `pistol`, the art is an SMG — spawns on `EvFired`). `ShootWord` always
 freezes a word range and uses the **shotgun** (pellet spread);
 `KillLine` freezes a line range and uses the **rocket launcher** (slow
 round, explosion FX). Line drags use the katana stance pose (hands on
@@ -249,8 +253,8 @@ only moves as a consequence of the deletion (`shiftCaret`).
 
 ```
 queue: Shoot / ShootAt ─► startShoot: freeze pendingShot{base,aim,...}
-       ├─ reach <= katanaReach (4) ─► ag.Slash ─► EvSlash ─► applyHit
-       └─ farther ─► ag.AimWith(Pistol) ─► EvFired ─► spawnBullet
+       ├─ same row && reach <= katanaReach (4) ─► Slash ─► EvSlash ─► applyHit
+       └─ farther / cross-row ─► AimWith(Pistol) ─► EvFired ─► spawnBullet
 queue: ShootWord ─► startSpecial: freeze word range, Shotgun ─► spread
 queue: KillLine ─► startSpecial: freeze line range, Rocket ─► explosion
        applyHit ─► doc.Delete(range) ─► shiftCaret ─► Shatter FX
@@ -400,7 +404,7 @@ in LAN mode (only tab 1 is wrapped in the session''s `ObservedDoc`).
 | `rocketBase` / `rocketSpeed` | 0.30 s / 900 px/s | slow, dramatic rocket |
 | `hitCooldown` | 0.03 | pause after a mutation applies |
 | `failCooldown` | 0.20 | pause after a rejected command |
-| `katanaReach` | 4 | cells the giant blade covers (Chebyshev); machine gun beyond |
+| `katanaReach` | 4 | cells the giant blade covers (Chebyshev, same row only); machine gun beyond |
 | `swapDur` | 0.16 | line-drag animation (agent DragTo uses the same duration, so they stay in lockstep) |
 | `statusDur` | 1.4 | default status lifetime |
 | `maxQueue` / `maxShootQ` | 256 / 6 | queue caps |

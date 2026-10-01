@@ -983,25 +983,54 @@ func TestDeleteSlashFacesForward(t *testing.T) {
 	}
 }
 
-func TestDeleteJoinSlashFacesForward(t *testing.T) {
-	// Delete at end of line joins the next line; the strike is forward,
-	// not back toward the previous column.
+func TestForwardJoinUsesThePistol(t *testing.T) {
+	// Delete at end of line joins the next line: the newline breaks on
+	// the NEXT row, so the katana must not swing - the pistol takes it.
 	e, d := newEngine("ab\ncd")
 	e.WalkTo(doc.Pos{Line: 0, Col: 2})
 	runFor(e, 0.5)
 	e.Shoot(false)
-	facing := 0
+	sawSlash, sawAim := false, false
 	ok := runUntil(e, 2, func() bool {
-		if v := e.View(); v.Agent.State == agent.StateSlash {
-			facing = v.Agent.Facing
+		v := e.View()
+		switch v.Agent.State {
+		case agent.StateSlash:
+			sawSlash = true
+		case agent.StateAim, agent.StateFire:
+			sawAim = true
 		}
 		return d.Text() == "abcd"
 	})
 	if !ok {
 		t.Fatalf("text = %q, want abcd", d.Text())
 	}
-	if facing != 1 {
-		t.Fatalf("join slash facing = %d, want 1", facing)
+	if sawSlash {
+		t.Fatal("a cross-line join must not use the katana")
+	}
+	if !sawAim {
+		t.Fatal("the join must be shot with the pistol")
+	}
+}
+
+func TestVerticalTargetUsesThePistol(t *testing.T) {
+	// Right-click a glyph on another line within katana reach: the blade
+	// only strikes along his own row.
+	e, d := newEngine("abc\ndef")
+	e.WalkTo(doc.Pos{Line: 0, Col: 1})
+	runFor(e, 0.5)
+	e.ShootAt(doc.Pos{Line: 1, Col: 1})
+	sawSlash := false
+	ok := runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			sawSlash = true
+		}
+		return d.Text() == "abc\ndf"
+	})
+	if !ok {
+		t.Fatalf("text = %q, want abc\\ndf", d.Text())
+	}
+	if sawSlash {
+		t.Fatal("a vertical target must not use the katana")
 	}
 }
 

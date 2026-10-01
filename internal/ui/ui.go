@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -55,7 +56,12 @@ type Services struct {
 	// Settings > Sprite Sheet; SetSheet switches (shell persists it).
 	Sheets   func() ([]string, string)
 	SetSheet func(name string) bool
-	Tabs     *Tabs // shared tab strip (nil = single buffer)
+	// FontSizes lists the selectable face sizes and the active one for
+	// Settings > Font Size; SetFontSize switches (shell persists it and
+	// re-points the engine grid at the rebuilt layout).
+	FontSizes   func() ([]int, int)
+	SetFontSize func(size int) bool
+	Tabs        *Tabs // shared tab strip (nil = single buffer)
 }
 
 // GumroadURL is the support link shown in the About dialog and README.
@@ -93,14 +99,15 @@ func (e *Editor) Dialog() *render.Dialog {
 	case e.About:
 		return &render.Dialog{Title: "About DUKE", Lines: aboutLines}
 	case e.Settings:
-		return settingsDialog(e.svc.Sheets)
+		return settingsDialog(e.svc.Sheets, e.svc.FontSizes)
 	}
 	return nil
 }
 
-// settingsDialog builds the sprite-sheet picker from the shell's sheet
-// list; the active sheet is marked. Lines map 1:1 to sheet names.
-func settingsDialog(sheets func() ([]string, string)) *render.Dialog {
+// settingsDialog builds the sprite-sheet + font-size picker from the
+// shell's lists; the active sheet/size are marked with "  *". Sheet
+// lines come first, then the FONT SIZE section.
+func settingsDialog(sheets func() ([]string, string), sizes func() ([]int, int)) *render.Dialog {
 	names, active := []string{}, ""
 	if sheets != nil {
 		names, active = sheets()
@@ -113,6 +120,17 @@ func settingsDialog(sheets func() ([]string, string)) *render.Dialog {
 		lines[i] = n
 		if n == active {
 			lines[i] += "  *"
+		}
+	}
+	if sizes != nil {
+		all, cur := sizes()
+		lines = append(lines, "", "FONT SIZE")
+		for _, s := range all {
+			line := fmt.Sprintf("%d", s)
+			if s == cur {
+				line += "  *"
+			}
+			lines = append(lines, line)
 		}
 	}
 	return &render.Dialog{Title: "Settings", Lines: lines}
@@ -251,9 +269,9 @@ func (e *Editor) onKey(v events.KeyPressed) {
 	case ebiten.KeyEnd:
 		eng.WalkTo(doc.Pos{Line: caret.Line, Col: d.RuneCount(caret.Line)})
 	case ebiten.KeyPageUp:
-		eng.WalkTo(verticalTarget(d, caret, -render.Rows))
+		eng.WalkTo(verticalTarget(d, caret, -e.svc.Layout.Rows()))
 	case ebiten.KeyPageDown:
-		eng.WalkTo(verticalTarget(d, caret, +render.Rows))
+		eng.WalkTo(verticalTarget(d, caret, +e.svc.Layout.Rows()))
 	}
 }
 
@@ -329,8 +347,12 @@ func (e *Editor) onMouse(v events.MousePressed) {
 			}
 		}
 		if v.Button == ebiten.MouseButtonLeft && e.Settings {
-			if names, ok := e.clickSheetLine(v.X, v.Y); ok {
-				e.setSheet(names)
+			if sheet, okSheet, size, okSize := e.clickSettingsLine(v.X, v.Y); okSheet || okSize {
+				if okSheet {
+					e.setSheet(sheet)
+				} else {
+					e.setFontSize(size)
+				}
 				return
 			}
 		}
@@ -479,26 +501,35 @@ func (e *Editor) settingsAction(i int) {
 	}
 }
 
-// clickSheetLine returns the sheet name whose dialog line was clicked.
-func (e *Editor) clickSheetLine(x, y int) (string, bool) {
+// clickSettingsLine maps a Settings-dialog click to a sprite sheet name
+// or a font size. The sheet lines come first (hasSheet), then the FONT
+// SIZE section (hasSize); clicks on the header/spacer hit neither.
+func (e *Editor) clickSettingsLine(x, y int) (sheet string, hasSheet bool, size int, hasSize bool) {
 	dlg := e.Dialog()
 	if dlg == nil {
-		return "", false
+		return
 	}
 	names, _ := []string{}, ""
 	if e.svc.Sheets != nil {
 		names, _ = e.svc.Sheets()
 	}
+	sizes, _ := []int{}, 0
+	if e.svc.FontSizes != nil {
+		sizes, _ = e.svc.FontSizes()
+	}
 	for i := range dlg.Lines {
 		if rect, ok := render.DialogLineRect(
 			e.svc.Layout.ScreenW, e.svc.Layout.ScreenH, *dlg, i); ok && rect.Contains(x, y) {
 			if i < len(names) {
-				return names[i], true
+				return names[i], true, 0, false
 			}
-			return "", true
+			if j := i - (len(names) + 2); j >= 0 && j < len(sizes) {
+				return "", false, sizes[j], true
+			}
+			return
 		}
 	}
-	return "", false
+	return
 }
 
 // setSheet switches the character sprite sheet and reports it.
@@ -509,6 +540,18 @@ func (e *Editor) setSheet(name string) {
 	}
 	log.Printf("sprite sheet: %s", name)
 	e.svc.Engine.SetStatus("SPRITE SHEET: " + name)
+	e.Settings = false
+}
+
+// setFontSize applies a Settings > Font Size pick (shell persists it and
+// re-grids the engine to the new layout).
+func (e *Editor) setFontSize(size int) {
+	if e.svc.SetFontSize == nil || !e.svc.SetFontSize(size) {
+		e.svc.Engine.SetStatus("BAD FONT SIZE: " + strconv.Itoa(size))
+		return
+	}
+	log.Printf("font size: %d", size)
+	e.svc.Engine.SetStatus("FONT SIZE: " + strconv.Itoa(size))
 	e.Settings = false
 }
 
