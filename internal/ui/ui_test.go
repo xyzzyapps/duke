@@ -98,6 +98,7 @@ type harness struct {
 	editor    *Editor
 	setCalls  []string // sheet names passed to SetSheet
 	sizeCalls []int    // sizes passed to SetFontSize
+	openPath  string   // path returned by the mocked open dialog ("" = cancel)
 }
 
 func newHarness(text string) *harness {
@@ -126,6 +127,12 @@ func newHarness(text string) *harness {
 		SetFontSize: func(size int) bool {
 			h.sizeCalls = append(h.sizeCalls, size)
 			return true
+		},
+		PickOpenPath: func(def string) (string, bool) {
+			if h.openPath == "" {
+				return "", false // cancel
+			}
+			return h.openPath, true
 		},
 	})
 	h.editor = ed
@@ -450,10 +457,40 @@ func TestFileMenuNewClearsBuffer(t *testing.T) {
 	}
 }
 
+func TestFileMenuOpenLoadsPickedFile(t *testing.T) {
+	// The fake store holds two files; the mocked open dialog picks the
+	// second one.
+	h := newHarness("unrelated")
+	h.store.files["picked.txt"] = "opened via the dialog"
+	h.openPath = "picked.txt"
+	clickCenter(h, render.FileBtn)
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[1]) // Open...
+	if h.doc.Text() != "opened via the dialog" {
+		t.Fatalf("text = %q, want the picked file's content", h.doc.Text())
+	}
+	if h.editor.svc.Path != "picked.txt" {
+		t.Fatalf("path = %q, want picked.txt", h.editor.svc.Path)
+	}
+	if h.editor.svc.Tabs.Cur().Path != "picked.txt" {
+		t.Fatalf("tab path = %q, want picked.txt", h.editor.svc.Tabs.Cur().Path)
+	}
+	if !strings.Contains(h.engine.status, "OPENED") {
+		t.Fatalf("status = %q, want an OPENED notice", h.engine.status)
+	}
+	// A cancelled dialog changes nothing.
+	before := h.doc.Text()
+	h.openPath = ""
+	clickCenter(h, render.FileBtn)
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[1]) // Open...
+	if h.doc.Text() != before || h.editor.svc.Path != "picked.txt" {
+		t.Fatal("a cancelled open must leave the buffer untouched")
+	}
+}
+
 func TestFileMenuSaveWrites(t *testing.T) {
 	h := newHarness("written by mouse")
 	clickCenter(h, render.FileBtn)
-	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[1]) // Save
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[2]) // Save
 	if h.store.files["note.txt"] != "written by mouse" {
 		t.Fatalf("stored = %q", h.store.files["note.txt"])
 	}
@@ -471,7 +508,7 @@ func TestFileMenuClosePublishesQuit(t *testing.T) {
 		}
 	})
 	clickCenter(h, render.FileBtn)
-	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[2]) // Close
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[3]) // Close
 	if quit != 1 {
 		t.Fatalf("quit events = %d, want 1", quit)
 	}
@@ -487,7 +524,7 @@ func TestFileMenuCloseConfirmsWhenDirty(t *testing.T) {
 		}
 	})
 	clickCenter(h, render.FileBtn)
-	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[2]) // Close
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[3]) // Close
 	if quit != 0 {
 		t.Fatal("first close on a dirty buffer must warn, not quit")
 	}
@@ -496,7 +533,7 @@ func TestFileMenuCloseConfirmsWhenDirty(t *testing.T) {
 	}
 	// Second close discards.
 	clickCenter(h, render.FileBtn)
-	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[2])
+	clickCenter(h, render.DropRects(render.FileBtn, render.FileMenuItems)[3])
 	if quit != 1 {
 		t.Fatalf("quit events = %d, want 1 after confirming", quit)
 	}

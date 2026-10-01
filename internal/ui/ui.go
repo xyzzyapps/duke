@@ -50,6 +50,9 @@ type Services struct {
 	// PickSavePath asks the user where to save an untitled buffer
 	// (native file dialog in the shell). Returns ok=false on cancel.
 	PickSavePath func(def string) (string, bool)
+	// PickOpenPath asks the user which file to open (native dialog in
+	// the shell). Returns ok=false on cancel.
+	PickOpenPath func(def string) (string, bool)
 	// ToggleMute flips audio and returns the new muted state (shell-side).
 	ToggleMute func() bool
 	// Sheets lists the selectable character sheets (names, active) for
@@ -484,16 +487,29 @@ func (e *Editor) updateHover() {
 	}
 }
 
-// fileAction implements File > New / Save / Close.
+// fileAction implements File > New / Open... / Save / Close.
 func (e *Editor) fileAction(i int) {
 	switch i {
 	case 0:
 		e.newFile()
 	case 1:
-		e.save()
+		e.open()
 	case 2:
+		e.save()
+	case 3:
 		e.close()
 	}
+}
+
+// open asks the shell for a file (native dialog) and loads it into the
+// current tab, replacing the buffer (File > Open...).
+func (e *Editor) open() {
+	picked, ok := e.pickOpenPath("")
+	if !ok || picked == "" {
+		return // cancelled
+	}
+	e.setPath(picked)
+	e.loadFromDisk("OPENED ")
 }
 
 // helpAction implements Help > Help Topics / About.
@@ -643,6 +659,15 @@ func (e *Editor) pickSavePath(def string) (string, bool) {
 		return def, true
 	}
 	return e.svc.PickSavePath(def)
+}
+
+// pickOpenPath consults the shell's native open dialog; without one the
+// open is cancelled.
+func (e *Editor) pickOpenPath(def string) (string, bool) {
+	if e.svc.PickOpenPath == nil {
+		return "", false
+	}
+	return e.svc.PickOpenPath(def)
 }
 
 // reload replaces the buffer with the file on disk.

@@ -36,7 +36,7 @@ const (
 
 // Menu item labels, in dropdown order. The editor maps indices to actions.
 var (
-	FileMenuItems     = []string{"New", "Save", "Close"}
+	FileMenuItems     = []string{"New", "Open...", "Save", "Close"}
 	HelpMenuItems     = []string{"Help Topics", "About"}
 	SettingsMenuItems = []string{"Sprite Sheet..."}
 )
@@ -126,7 +126,7 @@ func HelpLines() []string {
 		"ctrl + s ............ save    ctrl + o: reload",
 		"sound button (top bar)  toggles mute",
 		"settings menu ........ sprite sheet + font size (18/24/30)",
-		"file menu (top bar) . new / save / close    help menu: this + about",
+		"file menu (top bar) . new / open / save / close    help menu: this + about",
 		"F1 / esc ............ open or close this dialog",
 	}
 }

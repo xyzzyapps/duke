@@ -451,6 +451,7 @@ func main() {
 		Multiplayer:  nc != nil,
 		OpenURL:      openBrowser,
 		PickSavePath: pickSavePath,
+		PickOpenPath: pickOpenPath,
 		ToggleMute: func() bool {
 			return sound.ToggleMute()
 		},

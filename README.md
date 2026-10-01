@@ -44,7 +44,7 @@ size (1440x1100 at the default 30px face).
 | **`F2`** | chat line (Enter sends, Esc cancels) |
 | `F1` / `Esc` | help dialog |
 
-**Menus**: `File` (New / Save / Close), `Help` (Help Topics / **About**)
+**Menus**: `File` (New / **Open...** / Save / Close), `Help` (Help Topics / **About**)
 and `Settings` (**Sprite Sheet...**) live in the top bar. The sprite-sheet
 dialog switches the character live and the choice is persisted for the
 next launch. **Help > About** shows the support link — clicking it opens
