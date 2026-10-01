@@ -297,6 +297,10 @@ func (e *Editor) onCtrl(v events.KeyPressed) {
 		eng.KillLine(false) // rocket: emacs kill-line
 	case ebiten.KeyU:
 		eng.KillLine(true) // rocket: shell kill-to-start
+	case ebiten.KeyPageUp:
+		e.PrevTab() // ctrl: cycle tabs backwards
+	case ebiten.KeyPageDown:
+		e.NextTab() // ctrl: cycle tabs forward
 	case ebiten.KeyA:
 		eng.WalkTo(doc.Pos{Line: eng.Caret().Line, Col: 0}) // emacs bol
 	case ebiten.KeyE:

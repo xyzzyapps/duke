@@ -805,6 +805,36 @@ func TestCannotCloseLastTab(t *testing.T) {
 	}
 }
 
+func TestCtrlPageUpDownCycleTabs(t *testing.T) {
+	h := newHarness("first")
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true}) // tab 2
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true}) // tab 3
+	if len(h.editor.svc.Tabs.Items) != 3 || h.editor.svc.Tabs.Active != 2 {
+		t.Fatalf("tabs=%d active=%d, want 3 tabs on the last",
+			len(h.editor.svc.Tabs.Items), h.editor.svc.Tabs.Active)
+	}
+	// Ctrl+PageUp walks backwards and wraps.
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageUp, Ctrl: true})
+	if h.editor.svc.Tabs.Active != 1 {
+		t.Fatalf("after ctrl+pup active=%d, want 1", h.editor.svc.Tabs.Active)
+	}
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageUp, Ctrl: true})
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageUp, Ctrl: true})
+	if h.editor.svc.Tabs.Active != 2 {
+		t.Fatalf("wrap-around active=%d, want 2 (back on the last)", h.editor.svc.Tabs.Active)
+	}
+	// Ctrl+PageDown walks forward and wraps.
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageDown, Ctrl: true})
+	if h.editor.svc.Tabs.Active != 0 {
+		t.Fatalf("after ctrl+pdown active=%d, want 0", h.editor.svc.Tabs.Active)
+	}
+	// Plain PageUp/Down (no ctrl) must NOT switch tabs.
+	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyPageDown})
+	if h.editor.svc.Tabs.Active != 0 {
+		t.Fatalf("plain pgdown changed active=%d, want 0", h.editor.svc.Tabs.Active)
+	}
+}
+
 func TestTabStripClickSwitches(t *testing.T) {
 	h := newHarness("zero")
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true}) // now on tab 1

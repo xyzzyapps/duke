@@ -121,6 +121,7 @@ func HelpLines() []string {
 		"scrollbars .......... drag the edge bars to pan the camera",
 		"ctrl + up / down .... grabs the line with his hands and drags it",
 		"ctrl + z / ctrl + y . undo / redo",
+		"ctrl + pgup / pgdn . previous / next tab",
 		"ctrl + s ............ save    ctrl + o: reload",
 		"sound button (top bar)  toggles mute",
 		"settings menu ........ sprite sheet + font size (18/24/30)",

@@ -105,6 +105,24 @@ func (e *Editor) SwitchTab(i int) {
 	e.applyActive()
 }
 
+// NextTab activates the next tab, wrapping to the first (Ctrl+PageDown).
+func (e *Editor) NextTab() {
+	t := e.svc.Tabs
+	if t == nil || len(t.Items) == 0 {
+		return
+	}
+	e.SwitchTab((t.Active + 1) % len(t.Items))
+}
+
+// PrevTab activates the previous tab, wrapping to the last (Ctrl+PageUp).
+func (e *Editor) PrevTab() {
+	t := e.svc.Tabs
+	if t == nil || len(t.Items) == 0 {
+		return
+	}
+	e.SwitchTab((t.Active + len(t.Items) - 1) % len(t.Items))
+}
+
 // applyActive syncs the editor services and the engine with the active
 // tab (callers must saveCaret() before changing strip state).
 func (e *Editor) applyActive() {
