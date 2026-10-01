@@ -7,10 +7,9 @@
 //   - The caret is the insertion point; the gunman always ends up standing
 //     on it (the agent auto-follows the caret whenever it is idle).
 //   - Mutating commands (type, shoot, drag, undo/redo) are queued FIFO and
-//     only start when the world is "free": no letter in flight, no bullet
-//     in flight, no line swap running, no locked agent animation
-//     (aim/fire/recoil/win) and no fire cooldown. Document mutations are
-//     therefore strictly serialized.
+//     only start when the world is "free": no bullet in flight, no line
+//     swap running, no locked agent animation (aim/fire/recoil/win) and no
+//     fire cooldown. Document mutations are therefore strictly serialized.
 //   - Walks are NOT queued: WalkTo moves the caret and retargets the agent
 //     immediately (they never mutate the document), which keeps chained
 //     arrow presses and mouse clicks responsive.
@@ -32,7 +31,6 @@ import (
 
 // Timing/tuning constants (seconds unless noted).
 const (
-	letterFlight = 0.11 // a thrown letter's flight time
 	bulletBase   = 0.07 // pistol round flight floor
 	bulletSpeed  = 2200 // px/s across the buffer (distance-scaled shots)
 	shotgunBase  = 0.09 // shotgun pellets are slower
@@ -102,21 +100,11 @@ type Engine interface {
 type View struct {
 	Agent   agent.Snapshot // gunman pose
 	Caret   doc.Pos        // insertion point (== the agent's cell)
-	Letters []Letter       // thrown letters in flight
 	Bullets []Bullet       // shots in flight
 	Swaps   []Swap         // line-drag animations in progress
 	Status  string         // transient HUD message ("" if none)
 	FX      []fx.Effect    // effects to spawn this frame (drained)
 	Sounds  []fx.Sound     // sound cues to play this frame (drained)
-}
-
-// Letter is a rune flying from the gun tip into the buffer (the target cell
-// and caret are captured on the engine when it spawns).
-type Letter struct {
-	R            rune
-	T            float64 // progress 0..1
-	FromX, FromY float64
-	ToX, ToY     float64
 }
 
 // Bullet is a shot in flight toward an aim point (its base caret and
@@ -186,19 +174,16 @@ type engine struct {
 	ag  *agent.Agent
 	g   grid.Grid
 
-	queue       []cmd
-	caret       doc.Pos
-	letter      *Letter
-	letterPos   doc.Pos // target cell captured when the letter was thrown
-	letterCaret doc.Pos // caret captured when the letter was thrown
-	bullet      *Bullet
-	swap        *Swap
-	shot        *pendingShot // frozen when the aim/swing starts
-	cooldown    float64
-	status      string
-	statusT     float64
-	fx          []fx.Effect
-	sounds      []fx.Sound
+	queue    []cmd
+	caret    doc.Pos
+	bullet   *Bullet
+	swap     *Swap
+	shot     *pendingShot // frozen when the aim/swing starts
+	cooldown float64
+	status   string
+	statusT  float64
+	fx       []fx.Effect
+	sounds   []fx.Sound
 }
 
 // New creates an engine for the document, with the gunman starting at the
@@ -385,7 +370,7 @@ func (e *engine) Celebrate() {
 func (e *engine) Cancel() {
 	log.Printf("cancel: dropping %d queued commands", len(e.queue))
 	e.queue = nil
-	e.letter, e.bullet, e.swap = nil, nil, nil
+	e.bullet, e.swap = nil, nil
 	e.caret = doc.Pos{}
 	x, y := e.g.AgentOrigin(e.caret, agent.SpriteH)
 	e.ag.SetPos(x, y)
@@ -396,7 +381,7 @@ func (e *engine) SwapDocument(d doc.Document, caret doc.Pos) {
 	log.Printf("tab swap: %d lines, caret %+v", d.LineCount(), caret)
 	e.doc = d
 	e.queue = nil
-	e.letter, e.bullet, e.swap, e.shot = nil, nil, nil, nil
+	e.bullet, e.swap, e.shot = nil, nil, nil
 	e.fx, e.sounds = nil, nil
 	e.cooldown = 0
 	e.caret = d.Clamp(caret)
@@ -428,7 +413,7 @@ func (e *engine) setStatus(msg string, dur float64) {
 
 // busy reports whether a command may start right now.
 func (e *engine) busy() bool {
-	return e.letter != nil || e.bullet != nil || e.swap != nil ||
+	return e.bullet != nil || e.swap != nil ||
 		e.ag.Busy() || e.cooldown > 0
 }
 
@@ -442,7 +427,6 @@ func (e *engine) Tick(dt float64) {
 			e.applyHit() // melee connects: no projectile involved
 		}
 	}
-	e.tickLetter(dt)
 	e.tickBullet(dt)
 	e.tickSwap(dt)
 
@@ -513,38 +497,13 @@ func (e *engine) start(c cmd) {
 
 // --- letters ---------------------------------------------------------------
 
-// startLetter throws the rune from the gun tip toward the caret cell,
-// capturing the target cell and caret so a caret jump mid-flight cannot
-// retarget the letter.
+// startLetter inserts the rune at the caret immediately. Typing has no
+// flight animation: the glyph appears in place and the stamp sound marks
+// its arrival.
 func (e *engine) startLetter(r rune) {
-	mx, my := e.ag.Muzzle()
-	tx, ty := e.g.CellCenter(e.caret)
-	e.letterPos = e.caret
-	e.letterCaret = e.caret
-	e.letter = &Letter{R: r, FromX: mx, FromY: my, ToX: tx, ToY: ty}
-}
-
-// tickLetter advances the in-flight letter; on landing it mutates the doc.
-func (e *engine) tickLetter(dt float64) {
-	if e.letter == nil {
-		return
-	}
-	e.letter.T += dt / letterFlight
-	if e.letter.T < 1 {
-		return
-	}
-	// Land: insert into the captured cell. If the caret has since moved
-	// (a click during the flight), the click wins and the caret stays put;
-	// otherwise typing continues after the new rune.
-	end := e.doc.Insert(e.letterPos, string(e.letter.R))
-	if e.caret == e.letterCaret {
-		e.caret = end
-	} else {
-		e.caret = e.doc.Clamp(e.caret)
-	}
-	e.fx = append(e.fx, fx.Effect{Kind: fx.Stamp, X: e.letter.ToX, Y: e.letter.ToY})
+	end := e.doc.Insert(e.caret, string(r))
+	e.caret = end
 	e.play(fx.SoundStamp)
-	e.letter = nil
 	e.cooldown = hitCooldown
 }
 
@@ -653,11 +612,24 @@ func (e *engine) startShoot(c cmd) {
 		return
 	}
 	melee := reach(target, base) <= katanaReach
-	// Orientation reflects the strike direction: a target on the
-	// right means face right; left, own-cell or vertical means left.
-	face := -1
-	if target.Col > base.Col {
-		face = 1
+	// Orientation reflects the strike direction. Caret-derived shots
+	// (backspace/delete) strike the way the turn-first model faces him:
+	// back = left, forward = right. Explicit targets (right-click) face
+	// the clicked glyph; own-cell or vertical targets keep the current
+	// facing.
+	face := 1
+	if c.back {
+		face = -1
+	}
+	if c.hasTarget {
+		switch {
+		case target.Col > base.Col:
+			face = 1
+		case target.Col < base.Col:
+			face = -1
+		default:
+			face = e.facingDir()
+		}
 	}
 	e.shot = &pendingShot{
 		base:      base,
@@ -714,10 +686,11 @@ func (e *engine) startSpecial(c cmd) {
 		weapon:   weapon,
 	}
 	log.Printf("%s: %+v -> %+v", label, base, aim)
-	// Heavy weapons face the aim direction as well.
-	face := -1
-	if aim.Col > base.Col {
-		face = 1
+	// Heavy weapons strike the way the turn-first model faces him:
+	// back = left (line/word behind), forward = right.
+	face := 1
+	if c.back {
+		face = -1
 	}
 	e.ag.AimWith(face, weapon)
 }
@@ -956,9 +929,6 @@ func (e *engine) View() View {
 		Status: e.Status(),
 		FX:     e.fx,
 		Sounds: e.sounds,
-	}
-	if e.letter != nil {
-		v.Letters = append(v.Letters, *e.letter)
 	}
 	if e.bullet != nil {
 		v.Bullets = append(v.Bullets, *e.bullet)

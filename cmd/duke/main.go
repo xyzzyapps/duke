@@ -1,6 +1,6 @@
 // Command duke runs the gunman text editor: a notepad with no cursor,
 // where a small Duke Nukem-style character lives inside the buffer. He
-// walks to wherever you point him, throws letters in when you type, shoots
+// walks to wherever you point him, stamps letters in when you type, shoots
 // glyphs out when you delete, drags lines when you reorder them and
 // celebrates when the file is saved.
 //
@@ -35,10 +35,11 @@ import (
 )
 
 const (
-	frameDT     = 1.0 / 60.0 // fixed timestep: Ebitengine Update runs at 60 TPS
-	repeatDelay = 0.30       // held-key delay before repeating
-	repeatRate  = 0.07       // interval between repeats
-	dumpFrames  = 90         // frames rendered before a -dump screenshot
+	frameDT       = 1.0 / 60.0 // fixed timestep: Ebitengine Update runs at 60 TPS
+	repeatDelay   = 0.30       // held-key delay before repeating
+	repeatRate    = 0.07       // interval between repeats
+	mouseFireRate = 0.32       // held right-button rapid-fire interval
+	dumpFrames    = 90         // frames rendered before a -dump screenshot
 )
 
 // errDone quits the game loop cleanly (used by -dump).
@@ -76,15 +77,16 @@ type game struct {
 	editor *ui.Editor
 	path   string
 
-	view   actions.View
-	synth  *audio.Synth
-	tabs   *ui.Tabs // shared tab strip
-	nc     *netCtl  // LAN controller (nil in solo play)
-	keys   map[ebiten.Key]*repeatKey
-	dump   string
-	frames int
-	done   bool
-	quit   bool
+	view      actions.View
+	synth     *audio.Synth
+	tabs      *ui.Tabs // shared tab strip
+	nc        *netCtl  // LAN controller (nil in solo play)
+	keys      map[ebiten.Key]*repeatKey
+	rightHeld float64 // held right-button accumulator (rapid fire)
+	dump      string
+	frames    int
+	done      bool
+	quit      bool
 }
 
 // Update polls input, advances the simulation and the camera once frame.
@@ -216,6 +218,20 @@ func (g *game) collectInput(dt float64) {
 			x, y := ebiten.CursorPosition()
 			g.bus.Publish(events.MousePressed{X: x, Y: y, Button: btn})
 		}
+	}
+	// Holding the right button keeps firing at the cursor (rapid fire).
+	// The engine's cooldown paces the actual shots once the command
+	// queue is drained; this only reissues the click at the pistol's
+	// natural cadence so a held button reads as steady fire.
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+		g.rightHeld += dt
+		if g.rightHeld >= mouseFireRate {
+			g.rightHeld = 0
+			x, y := ebiten.CursorPosition()
+			g.bus.Publish(events.MousePressed{X: x, Y: y, Button: ebiten.MouseButtonRight})
+		}
+	} else {
+		g.rightHeld = 0
 	}
 }
 

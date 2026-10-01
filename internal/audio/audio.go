@@ -281,7 +281,7 @@ func launch(t float64) float64 {
 	return whistle + thrust
 }
 
-// tick is a thrown letter locking into the buffer.
+// tick is a typed letter landing in the buffer.
 func tick(t float64) float64 {
 	freq := 900 - 500*t/0.05
 	return math.Sin(2*math.Pi*freq*t) * math.Exp(-t*70) * 0.4

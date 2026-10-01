@@ -24,3 +24,6 @@ untitled.txt
 settings.json
 
 dump/
+
+# Release build output
+/dist/

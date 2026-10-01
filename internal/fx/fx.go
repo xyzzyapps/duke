@@ -14,8 +14,6 @@ const (
 	// Shatter is a glyph blown apart at (X, Y); Runes is the destroyed
 	// text whose fragments should spray outward.
 	Shatter Kind = iota
-	// Stamp is the impact flash when a thrown letter locks into the buffer.
-	Stamp
 	// Muzzle is the flash at the gun tip when a shot is fired.
 	Muzzle
 	// Blast is the wide shotgun muzzle flare.
@@ -48,7 +46,7 @@ const (
 	SoundShotgun
 	// SoundRocket: launch whoosh.
 	SoundRocket
-	// SoundStamp: a thrown letter locks into the buffer.
+	// SoundStamp: a typed letter lands in the buffer.
 	SoundStamp
 	// SoundSave: the save chime.
 	SoundSave

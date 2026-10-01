@@ -60,27 +60,29 @@ func TestTypingInsertsRunesInOrder(t *testing.T) {
 	}
 }
 
-func TestTypedLetterLandsWithStampFX(t *testing.T) {
+func TestTypingInsertsInstantlyWithSound(t *testing.T) {
+	// Typing has no flight animation: the rune locks into the buffer on
+	// the first tick and its arrival is heard (the stamp sound). No FX.
 	e, d := newEngine("")
 	e.TypeRune('x')
-	// FX must not appear before the letter lands.
-	if v := runFor(e, 0.02); len(v.FX) != 0 {
-		t.Fatalf("early FX = %v", v.FX)
-	}
-	deadline := 0.0
-	var v View
-	for ; deadline < 2; deadline += dt {
-		e.Tick(dt)
-		v = e.View()
-		if len(v.FX) > 0 {
-			break
+	stamp := false
+	ok := runUntil(e, 1, func() bool {
+		v := e.View()
+		for _, s := range v.Sounds {
+			if s == fx.SoundStamp {
+				stamp = true
+			}
 		}
+		if len(v.FX) != 0 {
+			t.Fatalf("unexpected FX = %v (typing must not animate)", v.FX)
+		}
+		return d.Text() == "x" && stamp
+	})
+	if !ok {
+		t.Fatalf("text = %q, stamp heard: %v", d.Text(), stamp)
 	}
-	if len(v.FX) != 1 || v.FX[0].Kind != fx.Stamp {
-		t.Fatalf("FX = %+v, want single Stamp", v.FX)
-	}
-	if d.Text() != "x" {
-		t.Fatalf("text = %q", d.Text())
+	if got := e.Caret(); got != (doc.Pos{Line: 0, Col: 1}) {
+		t.Fatalf("caret = %+v, want {0 1}", got)
 	}
 }
 
@@ -760,18 +762,19 @@ func TestBackspaceSwingsLeftOnlyWhenStrikingBackward(t *testing.T) {
 }
 
 func TestStrikesFaceTowardTheirTarget(t *testing.T) {
-	// Forward delete at the caret cell (target == base): faces left.
+	// Forward delete at the caret cell (target == base): strikes forward,
+	// the way the turn-first model faced him.
 	e, d := newEngine("abcdef")
 	e.Shoot(false)
-	facing := 1
+	facing := 0
 	runUntil(e, 2, func() bool {
 		if v := e.View(); v.Agent.State == agent.StateSlash {
 			facing = v.Agent.Facing
 		}
 		return d.Text() == "bcdef"
 	})
-	if facing != -1 {
-		t.Fatalf("facing = %d on own-cell strike, want -1", facing)
+	if facing != 1 {
+		t.Fatalf("facing = %d on own-cell strike, want 1 (forward)", facing)
 	}
 
 	// Right-click on a glyph LEFT of the caret: faces left (toward it).
@@ -954,5 +957,88 @@ func TestDeleteActsWithoutTurnWhenAlreadyFacingRight(t *testing.T) {
 	e.Shoot(false)
 	if !runUntil(e, 2, func() bool { return d.Text() == "b" }) {
 		t.Fatalf("text = %q, want b", d.Text())
+	}
+}
+
+// --- strike-facing (the turn-first model decides the blade's way) ----------
+
+func TestDeleteSlashFacesForward(t *testing.T) {
+	// Delete on the glyph AT the caret: the turn-first model faced him
+	// right, so the katana must swing right (target == base used to flip
+	// him left instead).
+	e, d := newEngine("ab")
+	e.Shoot(false) // already facing right: acts immediately
+	facing := 0
+	ok := runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d.Text() == "b" // the 'a' at his feet is struck
+	})
+	if !ok {
+		t.Fatalf("text = %q, want b", d.Text())
+	}
+	if facing != 1 {
+		t.Fatalf("slash facing = %d, want 1 (forward)", facing)
+	}
+}
+
+func TestDeleteJoinSlashFacesForward(t *testing.T) {
+	// Delete at end of line joins the next line; the strike is forward,
+	// not back toward the previous column.
+	e, d := newEngine("ab\ncd")
+	e.WalkTo(doc.Pos{Line: 0, Col: 2})
+	runFor(e, 0.5)
+	e.Shoot(false)
+	facing := 0
+	ok := runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d.Text() == "abcd"
+	})
+	if !ok {
+		t.Fatalf("text = %q, want abcd", d.Text())
+	}
+	if facing != 1 {
+		t.Fatalf("join slash facing = %d, want 1", facing)
+	}
+}
+
+func TestExplicitOwnCellShotKeepsFacing(t *testing.T) {
+	// A right-click on the glyph the gunman stands on has no geometric
+	// direction: he strikes the way he is already facing.
+	e, _ := newEngine("abc")
+	e.WalkTo(doc.Pos{Line: 0, Col: 1})
+	runFor(e, 0.5)
+	e.Shoot(true) // turn left first
+	runFor(e, 0.3)
+	e.ShootAt(doc.Pos{Line: 0, Col: 1}) // own cell
+	facing := 0
+	ok := runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+			return true
+		}
+		return false
+	})
+	if !ok || facing != -1 {
+		t.Fatalf("own-cell slash facing = %d (slash seen: %v), want -1", facing, ok)
+	}
+
+	e2, _ := newEngine("abc")
+	e2.WalkTo(doc.Pos{Line: 0, Col: 1})
+	runFor(e2, 0.5)
+	e2.ShootAt(doc.Pos{Line: 0, Col: 1}) // own cell, facing right
+	facing = 0
+	ok = runUntil(e2, 2, func() bool {
+		if v := e2.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+			return true
+		}
+		return false
+	})
+	if !ok || facing != 1 {
+		t.Fatalf("own-cell slash facing = %d (slash seen: %v), want 1", facing, ok)
 	}
 }

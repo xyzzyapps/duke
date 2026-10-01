@@ -1,7 +1,7 @@
 # DUKE — the gunman text editor
 
 A notepad with **no cursor**. A Duke Nukem-style gunman lives inside the
-text buffer: he walks to wherever you point him, throws letters into the
+text buffer: he walks to wherever you point him, types letters that stamp
 place when you type, **shoots glyphs out** when you delete, drags lines
 around when you reorder them, and celebrates when the file is saved.
 
@@ -21,7 +21,7 @@ fully procedural pixel-art sprites drawn at 2x (18x24 art pixels become
 
 | Input | Weapon / what happens |
 |---|---|
-| type | he throws letters that stamp into the buffer |
+| type | letters stamp straight into the buffer (instant, a sound per letter) |
 | `Backspace` (hold = auto-fires) | **first press turns him left**, next press = giant katana swing on the glyph behind (machine gun when 5+ cells away) |
 | `Delete` | first press turns him right, next press strikes (katana close, machine gun at range) |
 | **`Ctrl+Backspace`** | **SHOTGUN** — blasts the word behind the caret |
@@ -30,7 +30,7 @@ fully procedural pixel-art sprites drawn at 2x (18x24 art pixels become
 | **`Ctrl+U`** | rocket launcher — shell-style kill back to line start |
 | `Ctrl+A` / `Ctrl+E` | emacs: teleport to start / end of line |
 | `Enter` / `Tab` | split the line / insert 4 spaces |
-| arrows | first press turns that way, next presses walk him — he *is* the caret (Home/End/PgUp/PgDn walk directly; right-click attacks a glyph directly) |
+| arrows | first press turns that way, next presses walk him — he *is* the caret (Home/End/PgUp/PgDn walk directly; right-click attacks a glyph directly, holding it rapid-fires) |
 | left-click | walk there |
 | `Ctrl+Up` / `Ctrl+Down` | grabs the current line with his hands and drags it past its neighbour |
 | `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` | undo / redo (offline only in multiplayer) |

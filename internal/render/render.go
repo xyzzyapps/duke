@@ -38,7 +38,6 @@ var (
 	colBorder = color.RGBA{48, 54, 61, 255}
 	colStatus = color.RGBA{227, 179, 65, 255}
 	colTitle  = color.RGBA{88, 166, 255, 255}
-	colLetter = color.RGBA{240, 246, 252, 255}
 	colTracer = color.RGBA{255, 214, 106, 255}
 	colCaret  = color.RGBA{120, 200, 255, 255}
 	// katana
@@ -231,14 +230,11 @@ func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hu
 	}
 
 	// World entities, converted to screen space (the gunman covers his
-	// own cell, letters/bullets/particles fly above the text).
+	// own cell, bullets/particles fly above the text).
 	offX := float64(l.OriginX) - l.ScrollX
 	offY := float64(l.OriginY) - l.ScrollY
 	r.drawAgent(screen, v.Agent, offX, offY)
 	r.drawKatana(screen, v.Agent, offX, offY)
-	for _, let := range v.Letters {
-		r.drawLetter(screen, let, offX, offY)
-	}
 	for _, b := range v.Bullets {
 		r.drawBullet(screen, b, offX, offY)
 	}
@@ -298,15 +294,6 @@ func (r *Renderer) drawAgent(screen *ebiten.Image, a agent.Snapshot, offX, offY 
 	op.GeoM.Translate(a.X+offX, a.Y+offY)
 	op.Filter = ebiten.FilterNearest
 	screen.DrawImage(r.sheet().image(id), op)
-}
-
-// drawLetter draws a thrown rune arcing from the gun tip to its cell.
-func (r *Renderer) drawLetter(screen *ebiten.Image, l actions.Letter, offX, offY float64) {
-	t := math.Min(1, math.Max(0, l.T))
-	x := l.FromX + (l.ToX-l.FromX)*t + offX
-	y := l.FromY + (l.ToY-l.FromY)*t + offY - math.Sin(math.Pi*t)*14
-	scale := 1 + 0.25*math.Sin(math.Pi*t) // little pop mid-flight (1 = natural)
-	r.drawRuneCentered(screen, l.R, x, y, scale, colLetter)
 }
 
 // drawKatana renders the giant blade during a slash: it grows out of his
@@ -557,8 +544,7 @@ func (r *Renderer) drawMenu(screen *ebiten.Image, hud HUD) {
 	}
 }
 
-// drawDialog paints a centred modal dialog (Help/About) with a title bar
-// and a close hint.
+// drawDialog paints a centred modal dialog (Help/About).
 func (r *Renderer) drawDialog(screen *ebiten.Image, d Dialog) {
 	x, y, width, height, titleH, lineH, pad := dialogGeom(
 		r.layout.ScreenW, r.layout.ScreenH, d)
@@ -577,8 +563,6 @@ func (r *Renderer) drawDialog(screen *ebiten.Image, d Dialog) {
 		}
 		r.drawText(screen, l, float64(x+pad), float64(y+titleH+i*lineH), col)
 	}
-	r.drawText(screen, "Esc or click to close",
-		float64(x+pad), float64(y+titleH+len(d.Lines)*lineH+pad), colDim)
 }
 
 // drawText draws s with its upper-left corner at (x, y). GeoM operations

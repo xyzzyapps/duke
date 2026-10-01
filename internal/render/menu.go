@@ -108,10 +108,11 @@ func HelpLines() []string {
 	return []string{
 		"DUKE - THE GUNMAN TEXT EDITOR",
 		"",
-		"type ................ he throws letters into the buffer",
+		"type ................ letters land instantly - a stamp sound marks each one",
 		"backspace ........... first press turns him LEFT, next press swings the KATANA",
 		"hold backspace ...... turn once, then the sword flurry",
 		"delete .............. first press turns him RIGHT, next press strikes",
+		"right-click / hold .. shoots that glyph / holding = rapid fire",
 		"ctrl + backspace .... SHOTGUN blast: kills the word",
 		"ctrl + delete ....... shotgun: kills word + trailing spaces",
 		"ctrl + k ............ ROCKET LAUNCHER: kill line (emacs)",

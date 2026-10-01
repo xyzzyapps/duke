@@ -315,3 +315,31 @@ and drags lines when you reorder them.
       acts immediately, arrow->Step routing (181 total)
 - [x] Help dialog + README describe the model
 - [ ] Final git commit (done when the session is marked)
+
+## Phase 26 - Session 19: katana strike-facing fix + held right-click rapid fire
+- [x] Bug: forward Delete targets the glyph AT the caret (target == base), and
+      the old geometry rule ("own cell = left") flipped his facing mid-swing:
+      facing right, the katana swung LEFT. Caret-derived attacks (backspace /
+      delete / word / line kills) now strike the way the turn-first model
+      faced him (back = left, forward = right); explicit right-clicks keep
+      the geometric rule (face the clicked glyph; own-cell/vertical keep the
+      current facing) - startShoot + startSpecial
+- [x] Holding the right mouse button rapid-fires: the shell reissues the
+      right-click at the pistol cadence (0.32s) while the button is held;
+      the engine cooldown paces the actual shots
+- [x] Tests: delete-on-own-cell slashes forward, delete-join slashes forward,
+      explicit own-cell shot keeps the current facing; updated the old
+      own-cell expectation (184 total)
+- [x] Help dialog + README document the hold-to-rapid-fire
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 27 - Session 20: no more dialog close hint, instant typing
+- [x] Removed "Esc or click to close" from dialogs (Help/About/Sheet picker)
+- [x] Typing no longer animates: the rune locks into the buffer instantly
+      (no letter flight, no Stamp FX) - just the stamp sound; stripped the
+      Letter machinery (engine, renderer, fx.Stamp, colLetter) and the
+      old flight test rewritten (instant insert + SoundStamp + no FX)
+- [x] Katana strike facing confirmed correct (delete/own-cell now strikes
+      forward) - no further changes
+- [x] Help dialog + README: instant typing, held right-click rapid fire
+- [ ] Final git commit (done when the session is marked)

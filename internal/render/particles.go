@@ -59,8 +59,6 @@ func spawnParticles(dst *[]particle, e fx.Effect) {
 			}
 		}
 		burst(dst, e.X, e.Y, 8, 110, 0.45, colGold, colGray, colWhite)
-	case fx.Stamp:
-		burst(dst, e.X, e.Y, 5, 60, 0.30, colGold, colFlash)
 	case fx.Muzzle:
 		burst(dst, e.X, e.Y, 5, 150, 0.14, colFlash, colGold)
 	case fx.Blast:

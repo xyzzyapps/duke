@@ -1,5 +1,5 @@
 // Package agent implements the gunman: the character that replaces the text
-// cursor. He walks the buffer, throws letters into place, aims and fires at
+// cursor. He walks the buffer, types letters that stamp into place, aims and fires at
 // glyphs, drags lines and celebrates saves.
 //
 // The agent is a pure animation/movement state machine that knows nothing
