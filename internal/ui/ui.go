@@ -49,7 +49,13 @@ type Services struct {
 	// PickSavePath asks the user where to save an untitled buffer
 	// (native file dialog in the shell). Returns ok=false on cancel.
 	PickSavePath func(def string) (string, bool)
-	Tabs         *Tabs // shared tab strip (nil = single buffer)
+	// ToggleMute flips audio and returns the new muted state (shell-side).
+	ToggleMute func() bool
+	// Sheets lists the selectable character sheets (names, active) for
+	// Settings > Sprite Sheet; SetSheet switches (shell persists it).
+	Sheets   func() ([]string, string)
+	SetSheet func(name string) bool
+	Tabs     *Tabs // shared tab strip (nil = single buffer)
 }
 
 // GumroadURL is the support link shown in the About dialog and README.
@@ -61,6 +67,7 @@ type Editor struct {
 	svc        Services
 	Help       bool // help dialog visible
 	About      bool // about dialog visible
+	Settings   bool // settings dialog visible (sprite sheet picker)
 	menu       render.MenuState
 	closeArmed bool // File > Close needs a second click when dirty
 	chatOpen   bool // F2 chat draft line
@@ -85,8 +92,30 @@ func (e *Editor) Dialog() *render.Dialog {
 		return &render.Dialog{Title: "Help", Lines: render.HelpLines()}
 	case e.About:
 		return &render.Dialog{Title: "About DUKE", Lines: aboutLines}
+	case e.Settings:
+		return settingsDialog(e.svc.Sheets)
 	}
 	return nil
+}
+
+// settingsDialog builds the sprite-sheet picker from the shell's sheet
+// list; the active sheet is marked. Lines map 1:1 to sheet names.
+func settingsDialog(sheets func() ([]string, string)) *render.Dialog {
+	names, active := []string{}, ""
+	if sheets != nil {
+		names, active = sheets()
+	}
+	if len(names) == 0 {
+		names = []string{"duke"}
+	}
+	lines := make([]string, len(names))
+	for i, n := range names {
+		lines[i] = n
+		if n == active {
+			lines[i] += "  *"
+		}
+	}
+	return &render.Dialog{Title: "Settings", Lines: lines}
 }
 
 // aboutLines is the About dialog content (support link included).
@@ -210,9 +239,9 @@ func (e *Editor) onKey(v events.KeyPressed) {
 			eng.TypeRune(' ')
 		}
 	case ebiten.KeyLeft:
-		eng.WalkTo(leftTarget(d, caret))
+		eng.Step(-1)
 	case ebiten.KeyRight:
-		eng.WalkTo(rightTarget(d, caret))
+		eng.Step(1)
 	case ebiten.KeyUp:
 		eng.WalkTo(verticalTarget(d, caret, -1))
 	case ebiten.KeyDown:
@@ -286,9 +315,9 @@ func (e *Editor) onMouse(v events.MousePressed) {
 		}
 		return
 	}
-	// Any click closes an open dialog - except a click on the About
-	// support link, which opens the browser instead.
-	if e.Help || e.About {
+	// Dialogs: a click on the About link opens the browser; a click on a
+	// Settings sheet line switches the character. Any other click closes.
+	if e.Help || e.About || e.Settings {
 		if v.Button == ebiten.MouseButtonLeft && e.About {
 			if dlg := e.Dialog(); dlg != nil {
 				if rect, ok := render.DialogLinkRect(
@@ -299,8 +328,14 @@ func (e *Editor) onMouse(v events.MousePressed) {
 				}
 			}
 		}
+		if v.Button == ebiten.MouseButtonLeft && e.Settings {
+			if names, ok := e.clickSheetLine(v.X, v.Y); ok {
+				e.setSheet(names)
+				return
+			}
+		}
 		if v.Button == ebiten.MouseButtonLeft {
-			e.Help, e.About = false, false
+			e.Help, e.About, e.Settings = false, false, false
 		}
 		return
 	}
@@ -312,6 +347,14 @@ func (e *Editor) onMouse(v events.MousePressed) {
 		}
 		if render.HelpBtn.Contains(v.X, v.Y) {
 			e.toggleMenu(render.MenuHelp, render.HelpBtn)
+			return
+		}
+		if render.SettingsBtn.Contains(v.X, v.Y) {
+			e.toggleMenu(render.MenuSettings, render.SettingsBtn)
+			return
+		}
+		if render.SoundBtnRect(e.svc.Layout.ScreenW).Contains(v.X, v.Y) {
+			e.toggleSound()
 			return
 		}
 		// A click inside the open dropdown runs the item.
@@ -367,10 +410,7 @@ func (e *Editor) closeMenu() {
 
 // menuLabels returns the open menu's labels and anchor button.
 func (e *Editor) menuLabels() ([]string, render.Rect) {
-	if e.menu.Open == render.MenuHelp {
-		return render.HelpMenuItems, render.HelpBtn
-	}
-	return render.FileMenuItems, render.FileBtn
+	return render.MenuLabels(e.menu.Open)
 }
 
 // clickMenuItem runs the hovered/clicked item of the open dropdown.
@@ -379,9 +419,12 @@ func (e *Editor) clickMenuItem(x, y int) bool {
 	for i, rc := range render.DropRects(btn, labels) {
 		if rc.Contains(x, y) {
 			e.closeMenu()
-			if e.menu.Open == render.MenuHelp || btn == render.HelpBtn {
+			switch {
+			case e.menu.Open == render.MenuHelp || btn == render.HelpBtn:
 				e.helpAction(i)
-			} else {
+			case e.menu.Open == render.MenuSettings || btn == render.SettingsBtn:
+				e.settingsAction(i)
+			default:
 				e.fileAction(i)
 			}
 			return true
@@ -399,6 +442,10 @@ func (e *Editor) updateHover() {
 		e.menu.HoverBtn = 0
 	case render.HelpBtn.Contains(x, y):
 		e.menu.HoverBtn = 1
+	case render.SettingsBtn.Contains(x, y):
+		e.menu.HoverBtn = render.HoverSettings
+	case render.SoundBtnRect(e.svc.Layout.ScreenW).Contains(x, y):
+		e.menu.HoverBtn = render.HoverSound
 	}
 	if e.menu.Open != render.MenuNone {
 		labels, btn := e.menuLabels()
@@ -424,6 +471,47 @@ func (e *Editor) fileAction(i int) {
 }
 
 // helpAction implements Help > Help Topics / About.
+// settingsAction runs a Settings menu item: the only entry opens the
+// sprite-sheet picker dialog.
+func (e *Editor) settingsAction(i int) {
+	if i == 0 {
+		e.Settings = true
+	}
+}
+
+// clickSheetLine returns the sheet name whose dialog line was clicked.
+func (e *Editor) clickSheetLine(x, y int) (string, bool) {
+	dlg := e.Dialog()
+	if dlg == nil {
+		return "", false
+	}
+	names, _ := []string{}, ""
+	if e.svc.Sheets != nil {
+		names, _ = e.svc.Sheets()
+	}
+	for i := range dlg.Lines {
+		if rect, ok := render.DialogLineRect(
+			e.svc.Layout.ScreenW, e.svc.Layout.ScreenH, *dlg, i); ok && rect.Contains(x, y) {
+			if i < len(names) {
+				return names[i], true
+			}
+			return "", true
+		}
+	}
+	return "", false
+}
+
+// setSheet switches the character sprite sheet and reports it.
+func (e *Editor) setSheet(name string) {
+	if e.svc.SetSheet == nil || !e.svc.SetSheet(name) {
+		e.svc.Engine.SetStatus("NO SUCH SHEET: " + name)
+		return
+	}
+	log.Printf("sprite sheet: %s", name)
+	e.svc.Engine.SetStatus("SPRITE SHEET: " + name)
+	e.Settings = false
+}
+
 func (e *Editor) helpAction(i int) {
 	switch i {
 	case 0:
@@ -555,30 +643,6 @@ func (e *Editor) loadFromDisk(prefix string) {
 
 // --- caret target helpers --------------------------------------------------
 
-// leftTarget returns the cell one rune left of from (end of the previous
-// line when at column 0).
-func leftTarget(d doc.Document, from doc.Pos) doc.Pos {
-	if from.Col > 0 {
-		return doc.Pos{Line: from.Line, Col: from.Col - 1}
-	}
-	if from.Line > 0 {
-		return doc.Pos{Line: from.Line - 1, Col: d.RuneCount(from.Line - 1)}
-	}
-	return from
-}
-
-// rightTarget returns the cell one rune right of from (start of the next
-// line when at the line end).
-func rightTarget(d doc.Document, from doc.Pos) doc.Pos {
-	if from.Col < d.RuneCount(from.Line) {
-		return doc.Pos{Line: from.Line, Col: from.Col + 1}
-	}
-	if from.Line < d.LineCount()-1 {
-		return doc.Pos{Line: from.Line + 1, Col: 0}
-	}
-	return from
-}
-
 // verticalTarget moves by delta lines, clamping the column to the target
 // line's length.
 func verticalTarget(d doc.Document, from doc.Pos, delta int) doc.Pos {
@@ -643,4 +707,19 @@ func (e *Editor) openLink(url string) {
 		return
 	}
 	log.Printf("opened %s", url)
+}
+
+// toggleSound flips the mute state via the shell-provided hook.
+func (e *Editor) toggleSound() {
+	if e.svc.ToggleMute == nil {
+		return
+	}
+	muted := e.svc.ToggleMute()
+	if muted {
+		log.Printf("sound off")
+		e.svc.Engine.SetStatus("SOUND OFF")
+	} else {
+		log.Printf("sound on")
+		e.svc.Engine.SetStatus("SOUND ON")
+	}
 }

@@ -47,11 +47,12 @@ undo/redo, a status bar, a help overlay.
   clicks retarget the agent immediately.
 - FR-4: fully self-contained: no external assets (fonts/sprites/audio are
   embedded or procedural), nothing outside the working directory.
-- FR-5: every interface unit-tested without a GPU (94 tests).
+- FR-5: every interface unit-tested without a GPU (174 tests).
 
 **Non-goals (v1)**
 - Syntax highlighting, word wrap, line numbers, search, multiple buffers.
-- Wide (CJK) glyph alignment, IME candidate windows, clipboard/paste.
+- Wide (CJK) glyph support (JetBrains Mono shows placeholder boxes for CJK; column
+  alignment is preserved), IME candidate windows, clipboard/paste.
 - Audio. Mobile/web packaging.
 
 ## 3. Prior-art review (searched at session start)
@@ -59,7 +60,7 @@ undo/redo, a status bar, a help overlay.
 | Project | Relevance |
 |---|---|
 | `hajimehoshi/ebiten` (Ebitengine v2) | the engine used here |
-| `hajimehoshi/bitmapfont/v4` | embedded DOS-ish bitmap font used for all text |
+| JetBrains Mono (internal/fonts) | embedded OFL coding font: UTF-8 text, document face sized so one glyph advance == one cell |
 | `tinne26/ptxt`, `tinne26/etxt` | pixel-font renderers for Ebitengine (alternative font stacks) |
 | `ebitengine/exp/textinput` | experimental text-input handling (not needed; `AppendInputChars` suffices) |
 
@@ -208,13 +209,28 @@ Locked states (block new commands): Aim, Fire, Recoil, Slash, Win.
 Events returned by `Tick`: `EvArrived`, `EvFired` (spawn the projectile
 at `Muzzle()`), `EvSlash` (apply the katana hit directly, no projectile).
 
+**Orientation rule (v2, after play-testing):** facing reflects the
+direction of travel and of every attack. Walking left turns him left
+and walking right turns him right (walk() derives facing from dx);
+backspace strikes face the glyph behind/above him; right-click
+attacks face toward the clicked cell horizontally; heavy weapons face
+their frozen aim (Ctrl+U left, Ctrl+K right); vertical or own-cell
+strikes default to facing left. SetPos (teleport/load) resets him to
+the default right-facing stance.
+
+**Walk cycle:** four beats - contact A (left foot planted, right foot
+lifted, no sole under it), passing (legs together, body rides one pixel
+up), contact B (mirrored: right planted, left lifted), passing.
+pose() maps frames 1/3 to a -1px bob; the two contact frames differ in
+the sole row, pinned by a test.
+
 ### Weapon choice (`internal/actions`)
 
 Every attack freezes a `pendingShot{base, target, aim, from, to,
 weapon, ...}` when it starts. Regular shots pick the weapon by Chebyshev
 distance from the caret (base) to the target: `<= katanaReach` (4 cells)
-= **katana** (`Slash`, connects on `EvSlash`, no projectile); farther =
-**pistol** (`AimWith(Pistol)`, spawns on `EvFired`). `ShootWord` always
+= **katana** (`Slash`, drawn from the back sheath, connects on `EvSlash`, no projectile); farther =
+**machine gun** (`AimWith(Pistol)` — the enum/asset keep the name `pistol`, the art is an SMG — spawns on `EvFired`). `ShootWord` always
 freezes a word range and uses the **shotgun** (pellet spread);
 `KillLine` freezes a line range and uses the **rocket launcher** (slow
 round, explosion FX). Line drags use the katana stance pose (hands on
@@ -328,9 +344,9 @@ func (l *Layout) follow(cx, cy float64, d doc.Document, dt float64) // easing ca
 | printable rune | `TypeRune` | throws a letter (arcing, ~0.11 s) that stamps into the caret cell; he steps right after each landing |
 | Enter | `TypeRune('\n')` | splits the line (letter itself is invisible; stamp FX marks the landing) |
 | Tab | 4× `TypeRune(' ')` | four quick letters (keeps rune-column maths simple) |
-| Backspace (tap/hold) | `Shoot(true)` | **giant katana swing** on the glyph before the caret when within reach (Chebyshev <= 4 cells — covers the line above), the **pistol** beyond; hold = automatic flurry |
+| Backspace (tap/hold) | `Shoot(true)` | **giant katana swing** on the glyph before the caret when within reach (Chebyshev <= 4 cells — covers the line above), the **machine gun** beyond; hold = automatic flurry |
 | Delete | `Shoot(false)` | same proximity rule on the glyph at his feet / next line's start |
-| right-click a glyph | `ShootAt(cell)` | attacks that glyph **from where he stands** (katana if within 4 cells, pistol beyond); the caret does not move |
+| right-click a glyph | `ShootAt(cell)` | attacks that glyph **from where he stands** (katana if within 4 cells, machine gun beyond); the caret does not move |
 | Ctrl+Backspace | `ShootWord(true)` | **shotgun**: kills the word before the caret (blanks then word, in-line) |
 | Ctrl+Delete | `ShootWord(false)` | shotgun: kills the word ahead + its trailing blanks |
 | Ctrl+K | `KillLine(false)` | **rocket launcher**: emacs kill-line — to end of line, or the newline itself at EOL (joins) |
@@ -350,7 +366,7 @@ func (l *Layout) follow(cx, cy float64, d doc.Document, dt float64) // easing ca
 | File > New / Ctrl+N | `Doc.Load("")` + `Cancel` | clears the buffer, resets the gunman, status `NEW BUFFER` |
 | File > Save / Ctrl+S | saves the ACTIVE TAB to a file | named buffers write in place; untitled buffers open the native save dialog (Windows GetSaveFileNameW / macOS osascript / zenity-kdialog on Linux, working-dir fallback when no dialog exists); the picked path becomes the tab path; cancel keeps dirty and skips the celebration |
 | File > Close | `QuitRequested` on the bus | dirty buffer first warns (`UNSAVED CHANGES - CHOOSE CLOSE AGAIN TO DISCARD`), second click quits via `errQuit` |
-| Help > Help Topics | Help dialog | katana/shotgun/rocket/controls reference |
+| Settings > Sprite Sheet | sheet dialog | switches character live; shell persists to settings.json |\n\n| Help > Help Topics | Help dialog | katana/shotgun/rocket/controls reference |
 | Help > About | About dialog | shows `Support Xyzzy if you want this to be maintained!` + `https://xyzzy.gumroad.com/l/ykqqqy` + license/copyright lines |
 | mouse over menu bar | `MouseMoved` events | hover highlight; open dropdown dismisses on outside click or Esc |
 | empty-buffer backspace / buffer-edge line move / empty history | rejected | status message + 0.2 s cooldown (no input flood) |
@@ -379,12 +395,12 @@ in LAN mode (only tab 1 is wrapped in the session''s `ObservedDoc`).
 | Constant | Value | Meaning |
 |---|---|---|
 | `letterFlight` | 0.11 | thrown letter flight |
-| `bulletBase` / `bulletSpeed` | 0.07 s / 2200 px/s | pistol round flight (distance-scaled) |
+| `bulletBase` / `bulletSpeed` | 0.07 s / 2200 px/s | machine-gun round flight (distance-scaled) |
 | `shotgunBase` / `shotgunSpeed` | 0.09 s / 1400 px/s | pellet flight (slower, fanned) |
 | `rocketBase` / `rocketSpeed` | 0.30 s / 900 px/s | slow, dramatic rocket |
 | `hitCooldown` | 0.03 | pause after a mutation applies |
 | `failCooldown` | 0.20 | pause after a rejected command |
-| `katanaReach` | 4 | cells the giant blade covers (Chebyshev); pistol beyond |
+| `katanaReach` | 4 | cells the giant blade covers (Chebyshev); machine gun beyond |
 | `swapDur` | 0.16 | line-drag animation (agent DragTo uses the same duration, so they stay in lockstep) |
 | `statusDur` | 1.4 | default status lifetime |
 | `maxQueue` / `maxShootQ` | 256 / 6 | queue caps |

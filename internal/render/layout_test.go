@@ -8,22 +8,22 @@ import (
 	"shooter/internal/grid"
 )
 
-// testLayout mirrors the runtime geometry (12x32 cells, 80x16 viewport,
-// 32px HUD bars).
+// testLayout mirrors the runtime geometry (18x48 cells, 80x16 viewport,
+// 48px HUD bars at the shared GUI face size, 44px tab strip).
 func testLayout() Layout {
-	return NewLayout(grid.Grid{CellW: 12, CellH: 32}, 80, 16, 32)
+	return NewLayout(grid.Grid{CellW: 18, CellH: 48}, 80, 16, 48)
 }
 
 func TestNewLayoutGeometry(t *testing.T) {
 	l := testLayout()
-	if l.ScreenW != 960 {
-		t.Fatalf("ScreenW = %d, want 960", l.ScreenW)
+	if l.ScreenW != 1440 {
+		t.Fatalf("ScreenW = %d, want 1440", l.ScreenW)
 	}
-	if l.ScreenH != 596 { // 16*32 + 2*32 bars + 20 tab strip
-		t.Fatalf("ScreenH = %d, want 596", l.ScreenH)
+	if l.ScreenH != 908 { // 16*48 + 2*48 bars + 44 tab strip
+		t.Fatalf("ScreenH = %d, want 908", l.ScreenH)
 	}
-	if l.OriginY != 52 || l.ViewW != 960 || l.ViewH != 512 {
-		t.Fatalf("origin/view = %d %d %d (want origin 52)", l.OriginY, l.ViewW, l.ViewH)
+	if l.OriginY != 92 || l.ViewW != 1440 || l.ViewH != 768 {
+		t.Fatalf("origin/view = %d %d %d (want origin 92)", l.OriginY, l.ViewW, l.ViewH)
 	}
 }
 
@@ -41,8 +41,8 @@ func TestScreenToCellRoundTrip(t *testing.T) {
 	d := doc.New()
 	d.Load("hello\nworld")
 	// A screen point inside the viewport maps back to the same cell.
-	cellX := l.OriginX + 2*12 + 5 // col 2, inside the glyph
-	cellY := l.OriginY + 1*32 + 5 // line 1
+	cellX := l.OriginX + 2*18 + 5 // col 2, inside the glyph
+	cellY := l.OriginY + 1*48 + 5 // line 1
 	p, ok := l.ScreenToCell(cellX, cellY, d)
 	if !ok {
 		t.Fatal("point should be inside the viewport")
@@ -84,7 +84,7 @@ func TestScreenToCellHonoursScroll(t *testing.T) {
 	l := testLayout()
 	d := doc.New()
 	d.Load("aaa\nbbb\nccc")
-	l.ScrollY = 32 // one row down: screen shows line 1 at the top
+	l.ScrollY = 48 // one row down: screen shows line 1 at the top
 	p, ok := l.ScreenToCell(0, l.OriginY, d)
 	if !ok {
 		t.Fatal("inside viewport")
@@ -100,12 +100,12 @@ func TestFollowKeepsAgentInMiddleBand(t *testing.T) {
 	// A tall document so scrolling is possible.
 	d.Load("line\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline")
 	// Agent near the bottom: camera must move down but clamp to bounds.
-	l.follow(60, 19*32+16, d, 1.0)
+	l.follow(60, 19*48+16, d, 1.0)
 	if l.ScrollY <= 0 {
 		t.Fatalf("ScrollY = %v, should have followed down", l.ScrollY)
 	}
 	// Camera must never exceed the document bounds.
-	maxY := float64(d.LineCount()*32 - l.ViewH)
+	maxY := float64(d.LineCount()*l.CellH - l.ViewH)
 	if l.ScrollY > maxY+0.01 {
 		t.Fatalf("ScrollY = %v beyond max %v", l.ScrollY, maxY)
 	}
@@ -125,12 +125,12 @@ func TestFollowEasesTowardTarget(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		d.Insert(doc.Pos{Line: i, Col: 0}, "row\n")
 	}
-	l.follow(60, 50*32+16, d, 1.0/60.0)
+	l.follow(60, 50*48+16, d, 1.0/60.0)
 	first := l.ScrollY
 	if first <= 0 {
 		t.Fatalf("ScrollY = %v after one tick, want > 0", first)
 	}
-	l.follow(60, 50*32+16, d, 1.0/60.0)
+	l.follow(60, 50*48+16, d, 1.0/60.0)
 	if l.ScrollY < first {
 		t.Fatalf("ScrollY went backwards: %v -> %v", first, l.ScrollY)
 	}

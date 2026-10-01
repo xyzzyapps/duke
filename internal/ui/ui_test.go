@@ -25,6 +25,7 @@ type mockEngine struct {
 	kills    []bool    // rocket line kills (true = to line start)
 	walks    []doc.Pos
 	moves    []int
+	steps    []int // Step() calls (arrow keys, turn-first)
 	undos    int
 	redos    int
 	wins     int
@@ -46,6 +47,7 @@ func (m *mockEngine) WalkTo(p doc.Pos) {
 	m.caret = p
 	m.walks = append(m.walks, p)
 }
+func (m *mockEngine) Step(dir int)     { m.steps = append(m.steps, dir) }
 func (m *mockEngine) MoveLine(dir int) { m.moves = append(m.moves, dir) }
 func (m *mockEngine) Undo()            { m.undos++ }
 func (m *mockEngine) Redo()            { m.redos++ }
@@ -88,11 +90,12 @@ func (f *fakeStore) Write(path, content string) error {
 
 // harness wires a real doc/bus/layout with the mock engine and fake store.
 type harness struct {
-	doc    *doc.Buffer
-	engine *mockEngine
-	store  *fakeStore
-	bus    events.Bus
-	editor *Editor
+	doc      *doc.Buffer
+	engine   *mockEngine
+	store    *fakeStore
+	bus      events.Bus
+	editor   *Editor
+	setCalls []string // sheet names passed to SetSheet
 }
 
 func newHarness(text string) *harness {
@@ -103,6 +106,7 @@ func newHarness(text string) *harness {
 	store := &fakeStore{files: map[string]string{}}
 	layout := render.NewLayout(grid.Grid{CellW: 12, CellH: 32}, 80, 16, 32)
 	tabs := &Tabs{Items: []*Tab{{Doc: d, Path: "note.txt"}}}
+	h := &harness{doc: d, engine: eng, store: store, bus: bus}
 	ed := New(Services{
 		Bus:    bus,
 		Doc:    d,
@@ -111,8 +115,14 @@ func newHarness(text string) *harness {
 		Layout: &layout,
 		Path:   "note.txt",
 		Tabs:   tabs,
+		Sheets: func() ([]string, string) { return []string{"duke"}, "duke" },
+		SetSheet: func(name string) bool {
+			h.setCalls = append(h.setCalls, name)
+			return true
+		},
 	})
-	return &harness{doc: d, engine: eng, store: store, bus: bus, editor: ed}
+	h.editor = ed
+	return h
 }
 
 // --- tests -----------------------------------------------------------------
@@ -158,30 +168,20 @@ func TestBackspaceAndDeleteShoot(t *testing.T) {
 	}
 }
 
-func TestArrowKeysComputeTargets(t *testing.T) {
+func TestArrowKeysIssueStep(t *testing.T) {
 	h := newHarness("ab\ncdefgh\nxy")
 	h.engine.caret = doc.Pos{Line: 1, Col: 2}
 
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyLeft})
-	if got := h.engine.walks[len(h.engine.walks)-1]; got != (doc.Pos{Line: 1, Col: 1}) {
-		t.Fatalf("left -> %+v", got)
-	}
-	h.engine.caret = doc.Pos{Line: 1, Col: 2}
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyRight})
-	if got := h.engine.walks[len(h.engine.walks)-1]; got != (doc.Pos{Line: 1, Col: 3}) {
-		t.Fatalf("right -> %+v", got)
-	}
-	// Right at end of line drops to the next line start.
-	h.engine.caret = doc.Pos{Line: 1, Col: 6}
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyRight})
-	if got := h.engine.walks[len(h.engine.walks)-1]; got != (doc.Pos{Line: 2, Col: 0}) {
-		t.Fatalf("right at EOL -> %+v", got)
-	}
-	// Left at column 0 jumps to the previous line end.
-	h.engine.caret = doc.Pos{Line: 1, Col: 0}
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyLeft})
-	if got := h.engine.walks[len(h.engine.walks)-1]; got != (doc.Pos{Line: 0, Col: 2}) {
-		t.Fatalf("left at col 0 -> %+v", got)
+	got := h.engine.steps
+	if len(got) != 4 || got[0] != -1 || got[1] != 1 || got[2] != 1 || got[3] != -1 {
+		t.Fatalf("steps = %v, want [-1 1 1 -1]", got)
+	}
+	if len(h.engine.walks) != 0 {
+		t.Fatalf("arrows must not call WalkTo directly: %v", h.engine.walks)
 	}
 }
 
@@ -915,5 +915,55 @@ func TestIsUntitledNames(t *testing.T) {
 		if isUntitled(p) {
 			t.Fatalf("%q should NOT be untitled", p)
 		}
+	}
+}
+
+// --- settings / sprite sheets ----------------------------------------------
+
+func TestSettingsMenuOpensSheetDialog(t *testing.T) {
+	h := newHarness("hi")
+	clickCenter(h, render.SettingsBtn)
+	if got := h.editor.MenuState().Open; got != render.MenuSettings {
+		t.Fatalf("open = %q, want settings menu", got)
+	}
+	clickCenter(h, render.DropRects(render.SettingsBtn, render.SettingsMenuItems)[0])
+	if !h.editor.Settings {
+		t.Fatal("settings dialog should be open")
+	}
+	dlg := h.editor.Dialog()
+	if dlg == nil || dlg.Title != "Settings" {
+		t.Fatalf("dialog = %+v, want Settings", dlg)
+	}
+	joined := strings.Join(dlg.Lines, "|")
+	if !strings.Contains(joined, "duke") {
+		t.Fatalf("dialog lines = %q, want duke", joined)
+	}
+	if !strings.Contains(dlg.Lines[0], "*") {
+		t.Fatalf("active sheet not marked: %q", dlg.Lines[0])
+	}
+}
+
+func TestSettingsClickSwitchesSheet(t *testing.T) {
+	h := newHarness("hi")
+	clickCenter(h, render.SettingsBtn)
+	clickCenter(h, render.DropRects(render.SettingsBtn, render.SettingsMenuItems)[0])
+	dlg := h.editor.Dialog()
+	if dlg == nil {
+		t.Fatal("dialog missing")
+	}
+	// Click the duke line (index 0).
+	rc, ok := render.DialogLineRect(h.editor.svc.Layout.ScreenW, h.editor.svc.Layout.ScreenH, *dlg, 0)
+	if !ok {
+		t.Fatal("no line rect for duke")
+	}
+	clickCenter(h, rc)
+	if len(h.setCalls) != 1 || h.setCalls[0] != "duke" {
+		t.Fatalf("setCalls = %v, want [duke]", h.setCalls)
+	}
+	if h.editor.Settings {
+		t.Fatal("dialog should close after picking a sheet")
+	}
+	if !strings.Contains(h.engine.Status(), "SPRITE SHEET") {
+		t.Fatalf("status = %q, want sprite sheet notice", h.engine.Status())
 	}
 }

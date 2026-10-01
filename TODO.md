@@ -189,3 +189,129 @@ and drags lines when you reorder them.
       now plays ONLY on editor actions (letters, weapons, save)
 - [x] Removed the audio.Cues export; README audition line dropped
 - [x] Verified: a plain 4s run emits zero play lines
+
+## Phase 17 — Session 10: Duke mouth fix (user feedback)
+- [x] Mouth (two pixels, one row) no longer touches the red tank: stole
+      the hair-narrow row for a plain chin, so the face now reads
+      cheek -> mouth -> chin; win frame restructured to match
+- [x] Column-probe verified: cheek(art5), mouth(art6), chin(art7),
+      tank(art8); render tests + build green
+
+## Phase 19 - Session 12: direction-reflecting orientation + simple mouth
+- [x] Facing now follows direction of travel/attack (supersedes the
+      always-right rule): walking flips with dx, backspace faces the
+      struck glyph, right-click faces the clicked X direction, heavy
+      weapons face their aim (Ctrl+U left, Ctrl+K right), teleport
+      resets to right; startShoot/startSpecial compute face from target
+- [x] Mouth simplified to two dark pixels in one straight row
+      (..ksskkssk.., win frame matched); pinned by a test
+- [x] Tests rewritten to the new rule (171 total)
+
+## Phase 20 - Session 13: clarity, UTF-8, machine gun, sword from the back
+### (user approved: Scale 3 + bundled Go Mono, no downloads)
+- [x] Bump render.Scale 2 -> 3 and agent.SpriteW/H 24x32 -> 36x48 (world
+      px); grid stays art-driven (cellW = artW/2*Scale, cellH = artH*Scale)
+      so the sprite still fills exactly two cells wide x one tall
+- [x] Replace the bitmap font with an embedded TrueType monospace font
+      (golang.org/x/image/font/gofont/gomono - already in go.sum, zero
+      downloads); document face sized so a glyph advance == cellW exactly
+      (columns stay aligned), 16px chrome face for HUD/help/tabs
+- [x] Re-derive HUD/menu/dialog/tab geometry from the new face metrics
+      instead of hardcoded 6px advances; layout/menu/geometry tests
+      updated for the new window (1440x860)
+- [x] UTF-8: doc/actions were already rune-based; new tests pin Go Mono
+      column alignment for ASCII, accents, Greek, Cyrillic, CJK
+      placeholders and combining marks; rendered dump verified
+- [x] Machine gun: reworked the hip gun and aim frame into an SMG (long
+      barrel, receiver, curved magazine) + sheathed katana on the back;
+      help lines say machine gun; internals keep the Pistol name/sample
+- [x] Sword from the back: fixed the stale recoil offset (x = -1 -> +1;
+      the base art is left-native); katana pivot now starts at the back
+      sheath and slides into the front hands, sweeping over the shoulder
+      into the struck glyph (addresses "closer to the eyes"); verified
+      pixel-exact for both facings via ASCII-frame dumps
+- [x] Regenerate screenshot + SPEC/README (size, font, weapon art)
+## Phase 20b - Session 13b: full art redraw (user feedback round)
+- [x] Scale 3 made the 12x16 art blockier -> REDRAWN all frames at 18x24
+      art pixels, Scale back to 2 (sprite stays 36x48 screen px, cell
+      18x48, window 1440x860 - same layout, real detail)
+- [x] Machine gun now VISIBLE at all times: idle/walk/aim all hold the
+      SMG out front (6px barrel, receiver, magazine) Contra-style;
+      verified via ASCII frame maps
+- [x] Duke/Contra look: big flat-top, glinting 2-lens shades, shaded
+      cheeks, buff red tank, gold buckle, jeans, steel-toed boots
+- [x] Sword geometry rebuilt to add up: new frameKatanaDraw pose (he
+      reaches BACK to the sheath); the blade pivot starts at the actual
+      scabbard position (back edge) and slides to the front hands; the
+      cut finishes pointing at the struck glyph at FACE height (was 22
+      degrees down); katana stance keeps the empty scabbard on his back
+- [x] All frames re-verified via ASCII maps; 174 tests green
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 21 - Session 14: Sprite-Fusion stick hero + sprite sheet settings
+- [x] Inspected destroy.spritefusion.com: its hero is procedural (canvas
+      rig, not PNGs); extracted the rig proportions (head r7.5, torso 18,
+      arms 12/12, thighs/shins 14/14, SMG anchors) from the JS bundle
+- [x] Downloaded CC0 references (thekingphoenix/Bonsaiheldin gun hero,
+      devurandom beat-em-up sheet) from OpenGameArt for style study
+- [x] New "Stick" character sheet: 11 frames (idle/walk/aim/shotgun/
+      rocket/katana/kdraw/win) at 18x24, round head + outline body + SMG
+- [x] Renderer: sheet registry (duke/stick), SheetNames/ActiveSheet/
+      SetSheet (unknown rejected), draw paths use the active sheet
+- [x] Settings menu + dialog (top bar): lists sheets, marks the active
+      one, click switches live; shell persists to settings.json and
+      restores at launch; Settings button hover id + dropdown
+- [x] Fixed a latent bug: the shell never wired Services.ToggleMute (the
+      top-bar sound button was a silent no-op; Ctrl+M worked)
+- [x] Tests: sheet switch/reject, settings menu/dialog, click-to-switch
+      (177 total)
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 22 - Session 15: image sprite sheets + JetBrains Mono
+- [x] Font: embedded JetBrains Mono (SIL OFL 1.1, bundled) replaces Go
+      Mono for both faces; column/advance tests kept green
+- [x] Image sprite sheets (the site's strategy): sprites/<name>/<frame>.png
+      folders; any size PNG fitted to the 18x24 art grid (nearest);
+      per-pose fallback to the built-in duke art; new folders appear in
+      Settings > Sprite Sheet and override same-named built-ins
+- [x] cmd/gensprites exports the built-in Duke + Stick as editable PNGs
+      (sprites/duke, sprites/stick); the game loads them from disk
+- [x] Tests: disk loader + fallback + resize, sheet switch/reject (178)
+- [x] Docs: README sprite-swap workflow + font credit; SPEC registry
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 23 - Session 16: real character + uniform GUI font (user feedback)
+- [x] BUG: Settings menu opened the FILE dropdown (drawMenu lacked the
+      settings branch) - fixed via a shared MenuLabels helper
+- [x] Deleted both hand-made sprites (duke PNGs + stick sheet); the
+      character is now the CC0 gun-hero atlas by thekingphoenix/
+      Bonsaiheldin, sliced and installed as sprites/duke (idle, 4-pose
+      walk variants, SMG aim for all guns; katana poses reuse idle)
+- [x] One font size for ALL GUI elements: dropped the 16px chrome face -
+      single 30px JetBrains Mono face everywhere; HUD bars 48px, tab
+      strip 44px, menus/dialogs re-measured; layout tests updated
+- [x] Direction re-verified: dump shows the new character facing right
+      with the SMG barrel forward; katana pivot tests still green
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 24 - Session 17: "that's a girl" -> male trooper (user feedback)
+- [x] The gun-hero atlas was tagged female (author: "no dude here") -
+      replaced with Drakzlin's CC0 "Space soldier" (male trooper, rifle)
+- [x] Sliced the 64px atlas: idle = standing rifle pose, walk = the
+      4-frame rifle run cycle, aim/shotgun/rocket = the rifle attack
+      pose, katana/kdraw/win = idle; mirrored to the left-native base
+- [x] Verified via dump: trooper faces right with the rifle forward
+- [ ] Final git commit (done when the session is marked)
+
+## Phase 25 - Session 18: turn-first direction model (user direction)
+- [x] The sprite owns a facing: default RIGHT (eyes toward the next
+      character in the buffer); every directional key turns him FIRST
+      and the NEXT press acts (backspace = turn left, then katana;
+      arrows = turn, then walk; delete/word/line kills follow suit)
+- [x] Engine: Step(dir) with line-wrap (EOL -> next line, col0 -> prev
+      line end), turnIfNeeded(...) gate on Shoot/ShootWord/KillLine with
+      FACING LEFT/RIGHT status; agent.Face(dir); ui arrows -> Step
+- [x] Tests: turn-then-delete, turn-then-walk + wraps, already-facing
+      acts immediately, arrow->Step routing (181 total)
+- [x] Help dialog + README describe the model
+- [ ] Final git commit (done when the session is marked)

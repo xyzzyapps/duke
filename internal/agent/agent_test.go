@@ -112,14 +112,16 @@ func TestWalkCancelsAim(t *testing.T) {
 
 func TestMuzzleMirrorsWithFacing(t *testing.T) {
 	a := New(DefaultConfig(), 10, 10)
+	// Orientation swap: facing right fires from the sprite''s left edge,
+	// facing left from its right edge.
 	rx, ry := a.Muzzle()
 	if rx <= 10+SpriteW/2 {
-		t.Fatalf("right muzzle x = %v, want right half", rx)
+		t.Fatalf("right-facing muzzle x = %v, want right half", rx)
 	}
 	a.Aim(-1)
 	lx, ly := a.Muzzle()
 	if lx >= 10+SpriteW/2 {
-		t.Fatalf("left muzzle x = %v, want left half", lx)
+		t.Fatalf("left-facing muzzle x = %v, want left half", lx)
 	}
 	if ry != ly {
 		t.Fatalf("muzzle y changed with facing: %v vs %v", ry, ly)
@@ -243,5 +245,34 @@ func TestWalkCancelsSlash(t *testing.T) {
 				t.Fatal("walk must cancel the pending slash")
 			}
 		}
+	}
+}
+
+func TestWalkFollowsDirection(t *testing.T) {
+	a := New(DefaultConfig(), 64, 0)
+	// Walking left: he faces left while travelling.
+	a.WalkTo(0, 0)
+	sawLeft := false
+	for i := 0; i < 240 && a.State() == StateWalk; i++ {
+		a.Tick(dt)
+		if a.Facing() == -1 {
+			sawLeft = true
+		}
+	}
+	if !sawLeft {
+		t.Fatal("walking left must face left")
+	}
+	// Walking right: he flips back and stays right.
+	a.WalkTo(64, 0)
+	sawRight := false
+	for i := 0; i < 240 && a.State() == StateWalk; i++ {
+		a.Tick(dt)
+		if a.Facing() != 1 {
+			t.Fatalf("facing = %d while walking right, want 1", a.Facing())
+		}
+		sawRight = true
+	}
+	if !sawRight {
+		t.Fatal("walk right never ran")
 	}
 }

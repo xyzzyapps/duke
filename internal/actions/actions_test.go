@@ -88,6 +88,9 @@ func TestBackspaceShootsGlyphBehindCaret(t *testing.T) {
 	e, d := newEngine("ab")
 	e.WalkTo(doc.Pos{Line: 0, Col: 2})
 	runFor(e, 0.5) // let him arrive at the caret
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	if !runUntil(e, 2, func() bool { return d.Text() == "a" }) {
 		t.Fatalf("text = %q, want a", d.Text())
@@ -102,6 +105,9 @@ func TestBackspaceEmitsShatterFXWithRunes(t *testing.T) {
 	e, d := newEngine("ab")
 	e.WalkTo(doc.Pos{Line: 0, Col: 2})
 	runFor(e, 0.5)
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	var shatter *fx.Effect
 	runUntil(e, 2, func() bool {
@@ -138,6 +144,9 @@ func TestForwardShootDeletesGlyphAtCaret(t *testing.T) {
 
 func TestBackspaceAtBufferStartReportsStatus(t *testing.T) {
 	e, d := newEngine("")
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	runFor(e, 0.3)
 	if d.Text() != "" {
@@ -152,6 +161,9 @@ func TestBackspaceJoinsLines(t *testing.T) {
 	e, d := newEngine("ab\ncd")
 	e.WalkTo(doc.Pos{Line: 1, Col: 0})
 	runFor(e, 0.5)
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	if !runUntil(e, 2, func() bool { return d.Text() == "abcd" }) {
 		t.Fatalf("text = %q, want abcd", d.Text())
@@ -265,6 +277,9 @@ func TestCommandOrderIsFIFO(t *testing.T) {
 	e, d := newEngine("")
 	e.TypeRune('a')
 	e.TypeRune('b')
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true) // should fire only after both letters landed
 	e.Shoot(true) // should fire only after both letters landed
 	e.TypeRune('c')
 	if !runUntil(e, 3, func() bool { return d.Text() == "ac" }) {
@@ -349,6 +364,9 @@ func TestAdjacentBackspaceIsMelee(t *testing.T) {
 	e, d := newEngine("ab")
 	e.WalkTo(doc.Pos{Line: 0, Col: 2})
 	runFor(e, 0.5)
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	sawSlash, sawBullet := false, false
 	ok := runUntil(e, 2, func() bool {
@@ -378,6 +396,9 @@ func TestFarJoinUsesTheGun(t *testing.T) {
 	e, d := newEngine(strings.Repeat("x", 40) + "\n")
 	e.WalkTo(doc.Pos{Line: 1, Col: 0})
 	runFor(e, 1.0)
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
 	e.Shoot(true)
 	sawBullet := false
 	ok := runUntil(e, 3, func() bool {
@@ -537,6 +558,7 @@ func TestShootWordFiresTheShotgun(t *testing.T) {
 	e, d := newEngine("kill one two")
 	e.WalkTo(doc.Pos{Line: 0, Col: 8}) // end of "one"
 	runFor(e, 0.3)
+	e.ShootWord(true) // turn-first: press 1 turns him left, press 2 fires
 	e.ShootWord(true)
 	spread, boom, done := false, false, false
 	runUntil(e, 3, func() bool {
@@ -710,5 +732,227 @@ func TestSwapDocumentRestoresCaretAndDropsWork(t *testing.T) {
 	}
 	if d2.Text() != "second buffer" {
 		t.Fatalf("new buffer = %q, want untouched", d2.Text())
+	}
+}
+
+func TestBackspaceSwingsLeftOnlyWhenStrikingBackward(t *testing.T) {
+	// Backspace at a target to the left: the one time he faces left.
+	e, d := newEngine("abcdef")
+	e.WalkTo(doc.Pos{Line: 0, Col: 3})
+	runFor(e, 0.5)
+	// turn-first: the first backwards press only turns him left
+	// turn-first: the first backwards press only turns him left
+	e.Shoot(true)
+	e.Shoot(true)
+	facing := 1
+	ok := runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d.Text() == "abdef"
+	})
+	if !ok {
+		t.Fatalf("text = %q", d.Text())
+	}
+	if facing != -1 {
+		t.Fatalf("facing = %d during backward strike, want -1", facing)
+	}
+}
+
+func TestStrikesFaceTowardTheirTarget(t *testing.T) {
+	// Forward delete at the caret cell (target == base): faces left.
+	e, d := newEngine("abcdef")
+	e.Shoot(false)
+	facing := 1
+	runUntil(e, 2, func() bool {
+		if v := e.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d.Text() == "bcdef"
+	})
+	if facing != -1 {
+		t.Fatalf("facing = %d on own-cell strike, want -1", facing)
+	}
+
+	// Right-click on a glyph LEFT of the caret: faces left (toward it).
+	e2, d2 := newEngine("abcdef")
+	e2.WalkTo(doc.Pos{Line: 0, Col: 4})
+	runFor(e2, 0.5)
+	e2.ShootAt(doc.Pos{Line: 0, Col: 0})
+	facing = 1
+	runUntil(e2, 2, func() bool {
+		if v := e2.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d2.Text() == "bcdef"
+	})
+	if facing != -1 {
+		t.Fatalf("facing = %d on explicit left target, want -1", facing)
+	}
+
+	// Right-click on a glyph to the RIGHT: faces right.
+	e3, d3 := newEngine("abcdef")
+	e3.WalkTo(doc.Pos{Line: 0, Col: 1})
+	runFor(e3, 0.5)
+	e3.ShootAt(doc.Pos{Line: 0, Col: 4})
+	facing = -1
+	runUntil(e3, 2, func() bool {
+		if v := e3.View(); v.Agent.State == agent.StateSlash {
+			facing = v.Agent.Facing
+		}
+		return d3.Text() == "abcef"
+	})
+	if facing != 1 {
+		t.Fatalf("facing = %d on explicit right target, want 1", facing)
+	}
+}
+
+func TestHeavyWeaponsFaceTheirAim(t *testing.T) {
+	// Ctrl+U aims toward the line start (left): faces left.
+	e, d := newEngine("alpha beta\ngamma")
+	e.WalkTo(doc.Pos{Line: 0, Col: 10})
+	runFor(e, 0.5)
+	e.KillLine(true) // turn-first: press 1 turns him left, press 2 fires
+	e.KillLine(true)
+	facing := 1
+	runUntil(e, 3, func() bool {
+		v := e.View()
+		if v.Agent.State == agent.StateAim || v.Agent.State == agent.StateFire {
+			facing = v.Agent.Facing
+		}
+		return d.Text() == "\ngamma" // killed back to line start
+	})
+	if facing != -1 {
+		t.Fatalf("facing = %d aiming left, want -1", facing)
+	}
+
+	// Ctrl+K kills to end of line (right): faces right.
+	e2, d2 := newEngine("alpha\ngamma")
+	e2.WalkTo(doc.Pos{Line: 0, Col: 2})
+	runFor(e2, 0.5)
+	e2.KillLine(false)
+	facing = -1
+	runUntil(e2, 3, func() bool {
+		v := e2.View()
+		if v.Agent.State == agent.StateAim || v.Agent.State == agent.StateFire {
+			facing = v.Agent.Facing
+		}
+		return d2.Text() != "alpha\ngamma"
+	})
+	if facing != 1 {
+		t.Fatalf("facing = %d aiming right, want 1", facing)
+	}
+}
+
+func TestWalkingReflectsDirection(t *testing.T) {
+	e, _ := newEngine("hello world")
+	e.WalkTo(doc.Pos{Line: 0, Col: 9})
+	runFor(e, 1.0)
+
+	// Walking left: he faces left mid-walk.
+	e.WalkTo(doc.Pos{Line: 0, Col: 0})
+	sawLeft := false
+	runUntil(e, 2, func() bool {
+		v := e.View()
+		if v.Agent.State == agent.StateWalk && v.Agent.Facing == -1 {
+			sawLeft = true
+		}
+		return v.Agent.X == 0
+	})
+	if !sawLeft {
+		t.Fatal("walking left must face left")
+	}
+
+	// Walking right again: he flips back to right.
+	e.WalkTo(doc.Pos{Line: 0, Col: 9})
+	sawRight := false
+	runUntil(e, 2, func() bool {
+		v := e.View()
+		if v.Agent.State == agent.StateWalk && v.Agent.Facing == 1 {
+			sawRight = true
+		}
+		return v.Agent.X == 9*16 // test grid cellW = 16
+	})
+	if !sawRight {
+		t.Fatal("walking right must face right")
+	}
+}
+
+// --- turn-first input model -------------------------------------------------
+
+func TestFirstBackspaceTurnsThenSecondDeletes(t *testing.T) {
+	e, d := newEngine("ab")
+	e.WalkTo(doc.Pos{Line: 0, Col: 2})
+	runFor(e, 0.5)
+
+	// Press 1: only a turn to the left - no deletion, no cooldown.
+	e.Shoot(true)
+	runFor(e, 0.3)
+	if d.Text() != "ab" {
+		t.Fatalf("text changed on the turn press: %q", d.Text())
+	}
+	if v := e.View(); v.Agent.Facing != -1 {
+		t.Fatalf("facing = %d after first backspace, want -1", v.Agent.Facing)
+	}
+	if !strings.Contains(e.Status(), "FACING LEFT") {
+		t.Fatalf("status = %q, want the turn notice", e.Status())
+	}
+
+	// Press 2: the katana deletes the glyph behind.
+	e.Shoot(true)
+	if !runUntil(e, 2, func() bool { return d.Text() == "a" }) {
+		t.Fatalf("text = %q after the second press, want a", d.Text())
+	}
+}
+
+func TestStepTurnsThenWalksAndWraps(t *testing.T) {
+	e, _ := newEngine("ab\ncd")
+	e.WalkTo(doc.Pos{Line: 0, Col: 1})
+	runFor(e, 0.5)
+
+	// Left arrow: first press turns him, nothing moves.
+	e.Step(-1)
+	runFor(e, 0.3)
+	if c := e.Caret(); c != (doc.Pos{Line: 0, Col: 1}) {
+		t.Fatalf("caret moved on the turn press: %+v", c)
+	}
+	if v := e.View(); v.Agent.Facing != -1 {
+		t.Fatalf("facing = %d, want -1 after the turn", v.Agent.Facing)
+	}
+
+	// Second left press walks left.
+	e.Step(-1)
+	if !runUntil(e, 2, func() bool { return e.Caret() == (doc.Pos{Line: 0, Col: 0}) }) {
+		t.Fatalf("caret = %+v, want {0 0}", e.Caret())
+	}
+
+	// Right arrow: turn-first again, then wrap right at EOL -> next line.
+	e.Step(1) // turn
+	e.Step(1) // walk to col 1
+	e.Step(1) // walk to col 2 (EOL)
+	runFor(e, 2.0)
+	e.Step(1) // facing is right: wraps to the next line start
+	if !runUntil(e, 3, func() bool { return e.Caret() == (doc.Pos{Line: 1, Col: 0}) }) {
+		t.Fatalf("caret = %+v, want {1 0} after the wrap", e.Caret())
+	}
+
+	// Left at col 0 wraps to the previous line end.
+	e2, d2 := newEngine("ab\ncd")
+	e2.WalkTo(doc.Pos{Line: 1, Col: 0})
+	runFor(e2, 0.5)
+	e2.Step(-2) // first press turns left
+	e2.Step(-2) // second press walks left: wraps to the previous line end
+	if !runUntil(e2, 2, func() bool { return e2.Caret() == (doc.Pos{Line: 0, Col: 2}) }) {
+		t.Fatalf("caret = %+v, want {0 2} after the left wrap", e2.Caret())
+	}
+	_ = d2
+}
+
+func TestDeleteActsWithoutTurnWhenAlreadyFacingRight(t *testing.T) {
+	e, d := newEngine("ab")
+	// Default facing is right: Delete fires immediately.
+	e.Shoot(false)
+	if !runUntil(e, 2, func() bool { return d.Text() == "b" }) {
+		t.Fatalf("text = %q, want b", d.Text())
 	}
 }

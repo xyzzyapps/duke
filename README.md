@@ -10,23 +10,27 @@ around when you reorder them, and celebrates when the file is saved.
 > **Support Xyzzy if you want this to be maintained!**
 > https://xyzzy.gumroad.com/l/ykqqqy
 
-Built with Go and [Ebitengine](https://ebitengine.org) using an embedded
-bitmap font and fully procedural pixel-art sprites.
+Built with Go and [Ebitengine](https://ebitengine.org): everything is
+procedural — an embedded **JetBrains Mono** TrueType font (OFL 1.1, UTF-8: accents, Greek,
+Cyrillic and more render natively; CJK falls back to placeholder boxes) and
+fully procedural pixel-art sprites drawn at 2x (18x24 art pixels become
+36x48 screen pixels - the same sprite size, with real detail; window
+1440x860).
 
 ## Controls
 
 | Input | Weapon / what happens |
 |---|---|
 | type | he throws letters that stamp into the buffer |
-| `Backspace` (hold = auto-fires) | **giant katana swing** on the glyph behind (pistol when 5+ cells away) |
-| `Delete` / **right-click a glyph** | same rule: katana up close, pistol at range, fired from where he stands |
+| `Backspace` (hold = auto-fires) | **first press turns him left**, next press = giant katana swing on the glyph behind (machine gun when 5+ cells away) |
+| `Delete` | first press turns him right, next press strikes (katana close, machine gun at range) |
 | **`Ctrl+Backspace`** | **SHOTGUN** — blasts the word behind the caret |
 | **`Ctrl+Delete`** | shotgun — blasts the word ahead + its trailing spaces |
 | **`Ctrl+K`** | **ROCKET LAUNCHER** — emacs kill-line (to end of line, joins at EOL) |
 | **`Ctrl+U`** | rocket launcher — shell-style kill back to line start |
 | `Ctrl+A` / `Ctrl+E` | emacs: teleport to start / end of line |
 | `Enter` / `Tab` | split the line / insert 4 spaces |
-| arrows, `Home`, `End`, `PgUp`, `PgDn` | he walks there — he *is* the caret |
+| arrows | first press turns that way, next presses walk him — he *is* the caret (Home/End/PgUp/PgDn walk directly; right-click attacks a glyph directly) |
 | left-click | walk there |
 | `Ctrl+Up` / `Ctrl+Down` | grabs the current line with his hands and drags it past its neighbour |
 | `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y` | undo / redo (offline only in multiplayer) |
@@ -36,9 +40,45 @@ bitmap font and fully procedural pixel-art sprites.
 | **`F2`** | chat line (Enter sends, Esc cancels) |
 | `F1` / `Esc` | help dialog |
 
-**Menus**: the `File` menu (New / Save / Close) and `Help` menu (Help
-Topics / **About**) live in the top bar. **Help > About** shows the
-support link — clicking it opens your browser.
+**Menus**: `File` (New / Save / Close), `Help` (Help Topics / **About**)
+and `Settings` (**Sprite Sheet...**) live in the top bar. The sprite-sheet
+dialog switches the character live and the choice is persisted for the
+next launch. **Help > About** shows the support link — clicking it opens
+your browser. One typeface size is used everywhere (document, bars,
+menus, dialogs) — JetBrains Mono, 30px.
+
+## Character
+
+The gunman is the [CC0 "Space soldier" (64x64)
+sheet](https://opengameart.org/content/space-soldier-resize-64x64) by
+**Drakzlin** (Creative Commons Zero) — a male trooper with a rifle —
+sliced from the atlas (idle, the rifle run cycle, the rifle attack
+pose) and fitted to the game's 18x24 art box. It ships in
+`sprites/duke/` as editable PNGs.
+
+## Swap the sprites yourself
+
+The shipped characters live as **image files**, exactly like a game engine
+would load them — no code involved:
+
+```
+sprites/
+  duke/   idle.png walk0.png walk1.png walk2.png walk3.png
+          aim.png shotgun.png rocket.png katana.png kdraw.png win.png
+```
+
+Edit or replace any PNG (any size — it is fitted to the 24x36 art box with
+nearest-neighbour scaling; multiples of 18x24 are crispest) and relaunch:
+the change shows up in-game. Each **folder** under `sprites/` becomes its
+own character and appears in **Settings > Sprite Sheet**. You can even drop
+a single `idle.png` in a new folder — the missing poses reuse Duke's.
+`go run ./cmd/gensprites` re-exports the built-in sheets after an art
+change; the ASCII art in `internal/render/sprites.go` is the fallback
+source when a folder or pose is absent.
+
+**Font**: the editor renders with JetBrains Mono, embedded under
+`internal/fonts/assets` (SIL OFL 1.1, bundled with its license); a 30px
+document face + 16px chrome face keep every glyph exactly one cell wide.
 
 ## Tabs
 
@@ -125,8 +165,9 @@ while randomly destroying text.
 
 All character art is **plain text** living in
 `internal/render/sprites.go` — no image files, no tools, just edit and
-re-run. Each frame is 12 rows wide by 16 tall (the game draws it at 2x,
-so 24x32 on screen), written as one string per row:
+re-run. Each frame is 12 rows wide by 16 tall, written as one string per row (the
+game draws it at the global art scale 3x, so 36x48 on screen — exactly one
+layout row tall and two cells wide):
 
 ```go
 frameIdle: full(torsoRows, baseLegs),
@@ -150,7 +191,9 @@ and row 0 stays empty (the breathing bob lives there). `task check`
 validates dimensions and palette characters automatically, so mistakes
 fail the build instead of the game. Frames needed: `idle`, `walk0`-`walk3`,
 `aim`, `shotgun`, `rocket`, `katana`, `win` — see `pose()` for how states
-map to frames.
+map to frames. (The idle torso carries the machine gun at the hip and the
+sheathed katana across the back — mirrored automatically when he faces
+right, so both read from the same left-facing art.)
 
 ## Development
 

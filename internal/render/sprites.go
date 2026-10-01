@@ -12,21 +12,25 @@ import (
 
 // The gunman is Duke Nukem: platinum blond flat-top, thick black
 // wraparound glasses, red tank top, gold Nuke belt buckle, blue jeans and
-// black steel-tipped boots (the Duke Nukem 3D look).
+// black steel-tipped boots (the Duke Nukem 3D look). He carries a
+// **machine gun** held at the ready in front of him and the **katana
+// sheathed across his back**. The pixel array is the LEFT-facing base:
+// facing right is derived by mirroring at draw time.
 //
-// The art is artW x artH (12x16) and drawn at the font's Scale (2), so the
-// sprite occupies 24x32 screen pixels: exactly one layout row tall (feet on
-// the row's bottom edge, head never clipped by the HUD) and two cells wide.
-// Art pixels therefore have the same size as font pixels.
+// The art is artW x artH (18x24) and drawn at the font scale (2), so the
+// sprite occupies 36x48 screen pixels: exactly one layout row tall (feet
+// on the row's bottom edge, head never clipped by the HUD) and two cells
+// wide. Every art pixel is 2x2 screen pixels.
 //
-// Seven of the sixteen rows are the head (big head, thick glasses). The
-// frames cover his arsenal: idle with the pistol at his hip, a four-pose
-// walk cycle, pistol aim, shotgun, rocket launcher, the katana stance
-// (the giant blade itself is drawn by the renderer as a swinging vector)
-// and the victory pose.
+// Row plan (24 rows): 1 empty (breathing margin), 10 head rows, 8 torso
+// rows, 5 leg rows. The frames cover his arsenal: idle with the machine
+// gun out front, a four-pose walk cycle, machine-gun aim, shotgun, rocket
+// launcher, the katana stance, the katana draw (reaching to the sheath)
+// and the victory pose. The giant katana blade itself is drawn by the
+// renderer as a swinging vector.
 const (
-	artW = 12
-	artH = 16
+	artW = 18
+	artH = 24
 )
 
 // frameID indexes the sprite sheet.
@@ -42,6 +46,7 @@ const (
 	frameShotgun
 	frameRocket
 	frameKatana
+	frameKatanaDraw
 	frameWin
 	frameCount
 )
@@ -51,6 +56,7 @@ var palette = map[byte]color.RGBA{
 	'.': {0, 0, 0, 0},         // transparent
 	'k': {10, 12, 16, 255},    // outline
 	'h': {245, 220, 95, 255},  // platinum blond flat-top
+	'H': {255, 240, 150, 255}, // sun-bleached flat-top crown
 	'g': {26, 30, 44, 255},    // sunglasses lens
 	'G': {150, 195, 245, 255}, // lens glint (shine)
 	's': {236, 178, 134, 255}, // skin
@@ -66,42 +72,51 @@ var palette = map[byte]color.RGBA{
 	'o': {146, 92, 46, 255},   // shotgun wood forend
 }
 
-// Shared art fragments keep every frame consistent.
+// Shared art fragments keep every frame consistent. The gun faces LEFT
+// (he holds it out front); the katana sheath rides his back on the RIGHT.
 var (
 	headRows = []string{
-		".khhhhhhhhk.", // wide flat-top
-		".khhhhhhhhk.",
-		"..khhhhhhk..", // hair narrowing into the face
-		"..kgGsggsk..", // glasses: left lens (glint) + right lens
-		"..kggsggsk..", // glasses: lower row of both 2x2 lenses
-		"..kssssssk..", // face
-		"..kssSSssk..", // jaw with mouth shadow
+		".HHHHHHHHHHHHHHHH.", // sun-bleached flat-top crown
+		".HHHHHHHHHHHHHHHH.", // crown (bright)
+		".khhhhhhhhhhhhhhk.", // flat-top, square corners
+		".ksgGGgggggGGgsk..", // wraparound shades: glare per lens
+		".ksgggggggggggsk..", // shades: solid dark band (shaved sides beside)
+		"..kSssssssssSsk...", // cheeks with shading
+		"..kssssskkkssssk..", // mouth: short firm line
+		"..ksssssssssssk...", // chin
+		"..ksssssssssssk...", // jaw
+		".kssssssssssssk...", // jaw (wider)
 	}
-	// torsoRows: four rows — red tank with bare arms, pistol hanging at
-	// the hip, gold buckle belt, jeans hips.
+	// torsoRows: 8 rows — shoulders, the machine gun cradled out front
+	// (barrel, receiver, magazine), belt/buckle, jeans hips and the
+	// katana hilt + scabbard on the back edge.
 	torsoRows = []string{
-		"..ksrrrrsk..",
-		"..ksrrrrskd.", // pistol grip beside the hip
-		"..kbbnnbbkw.", // belt + buckle + pistol barrel
-		"..kbbbbbbk..",
+		"..ksrrrrrrrrrrsk..", // shoulders + arms
+		"wwwwwwssrrrrrskn..", // SMG barrel + both hands + katana guard
+		"..wwwkssrrrrrskdd.", // receiver + hands + scabbard
+		"..kssrrrrrrrrsSk..", // chest below the receiver
+		"..kbbbbnnnnbbbbk..", // belt + gold buckle
+		"..kddddbbbbbbbbk..", // magazine under the belt
+		"..kbbbbbbbbbbbbk..", // hips
+		"..kbbbbk..kbbbbk..", // legs split (crotch)
+	}
+	lowerRows = []string{
+		"..kbbbbnnnnbbbbk..", // belt + buckle
+		"..kbbbbbbbbbbbbk..", // hips
 	}
 	baseLegs = []string{
-		"..kbbk.kbbk.",
-		"..kbbk.kbbk.",
-		"..kptk.kptk.", // steel toes
-		"..kkkk.kkkk.",
-	}
-	// belt/hip rows shared by the armed poses (no hip gun while aiming).
-	lowerRows = []string{
-		"..kbbnnbbk..",
-		"..kbbbbbbk..",
+		".kbbbbbk..kbbbbbk.", // thighs
+		".kbbbbbk..kbbbbbk.", // knees
+		".kpppppk..kpppppk.", // boot shafts
+		".tttpppk...tttpppk", // boots + steel toes (facing left)
+		".kkkkkkk...kkkkkkk", // sole
 	}
 )
 
 // full assembles empty row + head + torso + legs into a complete frame.
 func full(torso, legs []string) []string {
 	rows := make([]string, 0, artH)
-	rows = append(rows, "............")
+	rows = append(rows, "..................")
 	rows = append(rows, headRows...)
 	rows = append(rows, torso...)
 	rows = append(rows, legs...)
@@ -110,65 +125,117 @@ func full(torso, legs []string) []string {
 
 // frameArt holds the ASCII art for every frame (artW columns x artH rows).
 var frameArt = map[frameID][]string{
-	frameIdle:  full(torsoRows, baseLegs),
-	frameWalk0: full(torsoRows, baseLegs),
+	frameIdle: full(torsoRows, baseLegs),
+	frameWalk0: full(torsoRows, []string{
+		// contact A: right foot planted, left foot lifted mid-swing
+		".kbbbbbk..kbbbbbk.",
+		".kbbbbbk..kbbbbbk.",
+		".kpppppk..kbbbkk..",
+		".ttpppk...kkkkk...",
+		".kkkkkkk..........",
+	}),
 	frameWalk1: full(torsoRows, []string{
-		"..kbbkkbbk..",
-		"..kbbkkbbk..",
-		"..kptkkptk..",
-		"..kkkkkkkk..",
+		// passing: legs together, body rides up a pixel (pose yOff)
+		".kbbbbbk..kbbbbbk.",
+		".kbbbbbk..kbbbbbk.",
+		".kpppppk..kpppppk.",
+		".tttpppk...tttpppk",
+		".kkkkkkk...kkkkkkk",
 	}),
 	frameWalk2: full(torsoRows, []string{
-		".kbbk..kbbk.",
-		".kbbk..kbbk.",
-		".kptk..kptk.",
-		".kkkk..kkkk.",
+		// contact B: left foot planted, right foot lifted mid-swing
+		".kbbbbbk..kbbbbbk.",
+		".kbbbbbk..kbbbbbk.",
+		".kbbbkk..kpppppk..",
+		".kkkkkk...ttpppk..",
+		"...........kkkkkkk",
 	}),
 	frameWalk3: full(torsoRows, []string{
-		"..kbbkkbbk..",
-		"..kbbkkbbk..",
-		"..kptkkptk..",
-		"..kkkkkkkk..",
+		// passing: legs together again
+		".kbbbbbk..kbbbbbk.",
+		".kbbbbbk..kbbbbbk.",
+		".kpppppk..kpppppk.",
+		".tttpppk...tttpppk",
+		".kkkkkkk...kkkkkkk",
 	}),
-	// Pistol: arm out, barrel, grip.
-	frameAim: full(append([]string{
-		"..ksrrrrswww",
-		"..ksrrrrsd..",
-	}, lowerRows...), baseLegs),
-	// Shotgun: double-height barrel over the wood forend.
-	frameShotgun: full(append([]string{
-		"..ksrrrrswww",
-		"..ksrrrrsoo.",
-	}, lowerRows...), baseLegs),
-	// Rocket launcher: thick tube with a red warhead at the tip.
-	frameRocket: full(append([]string{
-		"..ksrrrrswdr",
-		"..ksrrrrsd..",
-	}, lowerRows...), baseLegs),
-	// Katana stance: both arms thrust forward (the giant blade is drawn
-	// by the renderer as a swinging vector, not part of the art).
-	frameKatana: full(append([]string{
-		"..ksrrrrssss",
-		"..ksrrrrssk.",
-	}, lowerRows...), baseLegs),
-	// Victory: arms raised beside his big head, hands above the flat-top.
+	frameAim: full([]string{
+		"..ksrrrrrrrrrrsk..",
+		"wwwwwwwssrrrrskn..", // barrel raised, longer, both hands
+		"..wwwdkssrrrrskdd.",
+		"..kssrrrrrrrrsSk..",
+		"..kbbbbnnnnbbbbk..",
+		"..kddddbbbbbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbk..kbbbbk..",
+	}, baseLegs),
+	frameShotgun: full([]string{
+		"..ksrrrrrrrrrrsk..",
+		"wwwwwwwwssrrrskn..", // twin barrels, wider
+		"ooooooooosrrrrskd.", // wood forend
+		"..kssrrrrrrrrsSk..",
+		"..kbbbbnnnnbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbk..kbbbbk..",
+	}, baseLegs),
+	frameRocket: full([]string{
+		"..ksrrrrrrrrrrsk..",
+		"rrrrwwwwwwwrrrskn.", // warhead + tube across the chest
+		"..rrwwwwwwwrrrSkd.",
+		"..kssrrrrrrrrsSk..",
+		"..kbbbbnnnnbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbk..kbbbbk..",
+	}, baseLegs),
+	frameKatana: full([]string{
+		"..ksrrrrrrrrrrsk..",
+		"sssssssssrrrrrskn.", // both hands on the hilt, out front
+		"..ksssrrrrrrrskd..",
+		"..kssrrrrrrrrsSk..",
+		"..kbbbbnnnnbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbk..kbbbbk..",
+	}, baseLegs),
+	frameKatanaDraw: full([]string{
+		"..ksrrrrrrrrrrsk..",
+		"..ksrrrrrsssssskn.", // reaching back to the sheath
+		"..ksrrrrrksssskdd.",
+		"..kssrrrrrrrrsSk..",
+		"..kbbbbnnnnbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbbbbbbbbbk..",
+		"..kbbbbk..kbbbbk..",
+	}, baseLegs),
 	frameWin: func() []string {
 		rows := make([]string, 0, artH)
-		rows = append(rows, ".s........s.") // hands
-		rows = append(rows, ".shhhhhhhhs.") // arms + hair (wide)
-		rows = append(rows, ".shhhhhhhhs.")
-		rows = append(rows, ".skhhhhhhks.") // arms + hair (narrow)
-		rows = append(rows, ".skgGsggsk..") // arms + glasses
-		rows = append(rows, ".skggsggsk..")
-		rows = append(rows, ".skssssssks.") // arms + face
-		rows = append(rows, ".skssSSssks.") // arms + jaw
+		rows = append(rows, "..................")
+		rows = append(rows, ".s..............s.") // hands
+		rows = append(rows, ".sHHHHHHHHHHHHHHs.")
+		rows = append(rows, ".shhhhhhhhhhhhhhs.")
+		rows = append(rows, ".sksggGGGGGGGGgks.")
+		rows = append(rows, "..kssgggggggggsk..")
+		rows = append(rows, "..kSssssssssSsk...")
+		rows = append(rows, "..kssssskkkssssk..")
+		rows = append(rows, "..ksssssssssssk...")
+		rows = append(rows, "..ksssssssssssk...")
+		rows = append(rows, ".kssssssssssssk...")
 		rows = append(rows,
-			"..krrrrrrk..", // chest (arms are up, no side arms)
-			"..krrrrrrk..",
-			"..kbbnnbbk..",
-			"..kbbbbbbk..",
+			"..krrrrrrrrrrrrk..", // arms up, chest bare
+			"..krrrrrrrrrrrrk..",
+			"..krrrrrrrrrrrrk..",
+			"..kSrrrrrrrrrSrk..",
+			"..kbbbbnnnnbbbbk..",
+			"..kbbbbbbbbbbbbk..",
+			"..kbbbbbbbbbbbbk..",
+			"..kbbbbk..kbbbbk..",
+			".kbbbbbk..kbbbbbk.",
+			".kbbbbbk..kbbbbbk.",
+			".kpppppk..kpppppk.",
+			".tttpppk...tttpppk",
+			".kkkkkkk...kkkkkkk",
 		)
-		rows = append(rows, baseLegs...)
 		return rows
 	}(),
 }
@@ -203,10 +270,16 @@ type spriteSheet struct {
 	built bool
 }
 
+// allSheets maps character names to their frame art. The renderer builds
+// one sprite sheet per entry; the Settings dialog lets the player pick one.
+var allSheets = map[string]map[frameID][]string{
+	defaultSheet: frameArt,
+}
+
 // newSpriteSheet parses every frame's art.
-func newSpriteSheet() (*spriteSheet, error) {
+func newSpriteSheet(art map[frameID][]string) (*spriteSheet, error) {
 	s := &spriteSheet{}
-	for id, rows := range frameArt {
+	for id, rows := range art {
 		img, err := parseFrame(rows)
 		if err != nil {
 			return nil, fmt.Errorf("frame %d: %w", id, err)
@@ -238,7 +311,8 @@ func (s *spriteSheet) image(id frameID) *ebiten.Image {
 // pose picks the frame plus per-state draw offsets for a snapshot.
 // Offsets are in art pixels and are applied before mirroring, so they flip
 // with the facing automatically. Aiming uses the frame for the weapon in
-// his hands; melee and line drags use the katana stance.
+// his hands; melee uses the katana stance, except right at the start of a
+// swing when he is still reaching back to the sheath.
 func (s *spriteSheet) pose(a agent.Snapshot) (id frameID, xOff, yOff int) {
 	switch a.State {
 	case agent.StateIdle:
@@ -246,7 +320,12 @@ func (s *spriteSheet) pose(a agent.Snapshot) (id frameID, xOff, yOff int) {
 		// rise, so his feet stay planted on the row line at all times.
 		return frameIdle, 0, -(int(a.T*3) % 2)
 	case agent.StateWalk:
-		return frameID(frameWalk0 + frameID(a.Frame%4)), 0, 0
+		f := a.Frame % 4
+		y := 0
+		if f == 1 || f == 3 {
+			y = -1 // passing pose: body rides up a pixel
+		}
+		return frameID(frameWalk0 + frameID(f)), 0, y
 	case agent.StateAim, agent.StateFire:
 		switch a.Gun {
 		case agent.Shotgun:
@@ -256,7 +335,7 @@ func (s *spriteSheet) pose(a agent.Snapshot) (id frameID, xOff, yOff int) {
 		}
 		return frameAim, 0, 0
 	case agent.StateRecoil:
-		x := -1 // kick back
+		x := 1 // kick back (the base art faces left, so +x = his back)
 		switch a.Gun {
 		case agent.Shotgun:
 			return frameShotgun, x, 0
@@ -264,8 +343,13 @@ func (s *spriteSheet) pose(a agent.Snapshot) (id frameID, xOff, yOff int) {
 			return frameRocket, x, 0
 		}
 		return frameAim, x, 0
-	case agent.StateSlash, agent.StateDrag:
-		return frameKatana, 0, 0 // hands on the hilt / on the line
+	case agent.StateSlash:
+		if a.T < 0.12 {
+			return frameKatanaDraw, 0, 0 // one hand still at the sheath
+		}
+		return frameKatana, 0, 0 // both hands on the hilt, cutting
+	case agent.StateDrag:
+		return frameKatana, 0, 0 // hands on the line
 	case agent.StateWin:
 		return frameWin, 0, -2 // little hop
 	}

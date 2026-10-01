@@ -70,6 +70,9 @@ type Engine interface {
 	KillLine(back bool)
 	// WalkTo queues a walk to a buffer position; the caret moves there.
 	WalkTo(p doc.Pos)
+	// Step moves the gunman one cell left (-1)/right (+1); the first press
+	// in a new direction turns him, the next press walks (turn-first).
+	Step(dir int)
 	// MoveLine queues a one-line drag of the caret's line up (-1)/down (+1).
 	MoveLine(dir int)
 	// Undo/Redo queue history jumps.
@@ -220,7 +223,73 @@ func (e *engine) TypeRune(r rune) {
 }
 
 // Shoot implements Engine (caret-derived target).
+// turnIfNeeded faces the gunman toward dir (+1 right, -1 left) when he
+// looks the other way, reporting the turn. Returns true when the press
+// was consumed by the turn and the caller must drop the command; the
+// next press in that direction acts (turn-first input model).
+func (e *engine) turnIfNeeded(dir int) bool {
+	if e.facingDir() == dir {
+		return false
+	}
+	e.ag.Face(dir)
+	if dir < 0 {
+		e.setStatus("FACING LEFT", 0.9)
+	} else {
+		e.setStatus("FACING RIGHT", 0.9)
+	}
+	return true
+}
+
+// facingDir is the gunman's current direction (1 right by default, -1 left).
+func (e *engine) facingDir() int {
+	if e.ag.Snapshot().Facing < 0 {
+		return -1
+	}
+	return 1
+}
+
+// dirFor converts a "backwards?" flag to a direction.
+func dirFor(back bool) int {
+	if back {
+		return -1
+	}
+	return 1
+}
+
+// Step moves the gunman one cell left (-1) or right (+1), wrapping at
+// line edges (right at EOL -> next line start, left at col 0 -> previous
+// line end). The first press in a new direction only turns him; the next
+// press walks (turn-first input model).
+func (e *engine) Step(dir int) {
+	if dir > 0 {
+		dir = 1
+	} else {
+		dir = -1
+	}
+	if e.turnIfNeeded(dir) {
+		return
+	}
+	p := e.caret
+	if dir > 0 {
+		if p.Col >= e.doc.RuneCount(p.Line) && p.Line+1 < e.doc.LineCount() {
+			p = doc.Pos{Line: p.Line + 1, Col: 0}
+		} else {
+			p.Col++
+		}
+	} else {
+		if p.Col == 0 && p.Line > 0 {
+			p = doc.Pos{Line: p.Line - 1, Col: e.doc.RuneCount(p.Line - 1)}
+		} else {
+			p.Col--
+		}
+	}
+	e.WalkTo(p)
+}
+
 func (e *engine) Shoot(back bool) {
+	if e.turnIfNeeded(dirFor(back)) {
+		return // the press turned him; the next one fires
+	}
 	// Auto-fire backpressure: drop shots beyond the pending cap so a held
 	// backspace degrades into steady automatic fire instead of a backlog.
 	if n := e.countShots(); n >= maxShootQ {
@@ -250,6 +319,9 @@ func (e *engine) countShots() int {
 
 // ShootWord implements Engine (shotgun on the word before/after caret).
 func (e *engine) ShootWord(back bool) {
+	if e.turnIfNeeded(dirFor(back)) {
+		return // the press turned him; the next one fires
+	}
 	if n := e.countShots(); n >= maxShootQ {
 		return
 	}
@@ -258,6 +330,9 @@ func (e *engine) ShootWord(back bool) {
 
 // KillLine implements Engine (rocket launcher on the line).
 func (e *engine) KillLine(back bool) {
+	if e.turnIfNeeded(dirFor(back)) {
+		return // the press turned him; the next one fires
+	}
 	if n := e.countShots(); n >= maxShootQ {
 		return
 	}
@@ -578,6 +653,12 @@ func (e *engine) startShoot(c cmd) {
 		return
 	}
 	melee := reach(target, base) <= katanaReach
+	// Orientation reflects the strike direction: a target on the
+	// right means face right; left, own-cell or vertical means left.
+	face := -1
+	if target.Col > base.Col {
+		face = 1
+	}
 	e.shot = &pendingShot{
 		base:      base,
 		target:    target,
@@ -590,11 +671,11 @@ func (e *engine) startShoot(c cmd) {
 	if melee {
 		log.Printf("katana: %+v -> %+v", base, target)
 		e.play(fx.SoundSlash) // the whoosh plays as the swing starts
-		e.ag.Slash(facingFor(base, target))
+		e.ag.Slash(face)
 		return
 	}
 	log.Printf("pistol: %+v -> %+v", base, target)
-	e.ag.AimWith(facingFor(base, target), agent.Pistol)
+	e.ag.AimWith(face, agent.Pistol)
 }
 
 // startSpecial handles the shotgun (word) and rocket (line) commands:
@@ -633,16 +714,12 @@ func (e *engine) startSpecial(c cmd) {
 		weapon:   weapon,
 	}
 	log.Printf("%s: %+v -> %+v", label, base, aim)
-	e.ag.AimWith(facingFor(base, aim), weapon)
-}
-
-// facingFor turns him toward an aim point relative to the shot's base;
-// vertical aims default to facing left.
-func facingFor(base, aim doc.Pos) int {
+	// Heavy weapons face the aim direction as well.
+	face := -1
 	if aim.Col > base.Col {
-		return 1
+		face = 1
 	}
-	return -1
+	e.ag.AimWith(face, weapon)
 }
 
 // midpoint returns a representative cell inside [from, to) for FX.

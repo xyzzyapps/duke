@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"image"
@@ -121,7 +122,7 @@ func (g *game) Update() error {
 // the loop to quit.
 func (g *game) Draw(screen *ebiten.Image) {
 	hud := render.HUD{
-		Path:      filepath.Base(g.path),
+		SoundOn:   !g.synth.Muted(),
 		Menu:      g.editor.MenuState(),
 		Dialog:    g.editor.Dialog(),
 		ChatDraft: g.editor.ChatDraft(),
@@ -131,8 +132,12 @@ func (g *game) Draw(screen *ebiten.Image) {
 		hud.LocalChat = g.nc.localChat
 	}
 	for i, tab := range g.tabs.Items {
+		title := render.TabTitle(tab.Path)
+		if tab.Doc.Dirty() {
+			title += " *"
+		}
 		hud.Tabs = append(hud.Tabs, render.TabInfo{
-			Title:  render.TabTitle(tab.Path),
+			Title:  title,
 			Active: i == g.tabs.Active,
 		})
 	}
@@ -229,6 +234,35 @@ func savePNG(screen *ebiten.Image, path string) error {
 	return png.Encode(f, img)
 }
 
+// settingsFile stores the last sheet the player picked (working dir).
+const settingsFile = "settings.json"
+
+// loadSheet restores the persisted character sheet, if any.
+func loadSheet(rend *render.Renderer) {
+	b, err := os.ReadFile(settingsFile)
+	if err != nil {
+		return
+	}
+	var s struct {
+		Sheet string
+	}
+	if json.Unmarshal(b, &s) != nil || s.Sheet == "" {
+		return
+	}
+	rend.SetSheet(s.Sheet)
+}
+
+// saveSheet persists the chosen sheet for the next launch.
+func saveSheet(name string) {
+	b, err := json.Marshal(struct {
+		Sheet string
+	}{name})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(settingsFile, b, 0o644)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	dump := flag.String("dump", "",
@@ -262,6 +296,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("renderer: %v", err)
 	}
+	loadSheet(rend) // Settings > Sprite Sheet is persisted across runs
 
 	var d doc.Document = doc.New()
 
@@ -310,6 +345,15 @@ func main() {
 	if nc != nil {
 		netIF = nc
 	}
+	// Sound engine: WAV samples by default (silent until files exist in
+	// the sounds/ directory); -synth selects the built-in synthesizer.
+	var sound *audio.Synth
+	if *synthFlag {
+		sound = audio.NewSynth()
+	} else {
+		sound = audio.NewSamples(audio.SoundsDir)
+	}
+	log.Printf("sound: %s", sound.Mode())
 	editor := ui.New(ui.Services{
 		Bus:          bus,
 		Doc:          d,
@@ -321,22 +365,25 @@ func main() {
 		Multiplayer:  nc != nil,
 		OpenURL:      openBrowser,
 		PickSavePath: pickSavePath,
-		Tabs:         tabs,
+		ToggleMute: func() bool {
+			return sound.ToggleMute()
+		},
+		Sheets: func() ([]string, string) {
+			return rend.SheetNames(), rend.ActiveSheet()
+		},
+		SetSheet: func(name string) bool {
+			if !rend.SetSheet(name) {
+				return false
+			}
+			saveSheet(name)
+			return true
+		},
+		Tabs: tabs,
 	})
 	if !joining {
 		// Solo/host: load our file. Clients take the host's buffer.
 		editor.LoadFile()
 	}
-
-	// Sound engine: WAV samples by default (silent until files exist in
-	// the sounds/ directory); -synth selects the built-in synthesizer.
-	var sound *audio.Synth
-	if *synthFlag {
-		sound = audio.NewSynth()
-	} else {
-		sound = audio.NewSamples(audio.SoundsDir)
-	}
-	log.Printf("sound: %s", sound.Mode())
 
 	g := &game{
 		bus:    bus,

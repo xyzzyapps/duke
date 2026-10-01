@@ -81,8 +81,11 @@ type Event struct {
 // and two cells wide. The gunman covers his own cell plus the cell to his
 // right; the glyph he is about to shoot (to his left) always stays visible.
 const (
-	SpriteW = 24.0
-	SpriteH = 32.0
+	// World-pixel size of the sprite: the 12x16 art sheet rendered at the
+	// global art scale (render.Scale = 3), i.e. exactly two cells wide and
+	// one cell tall.
+	SpriteW = 36.0
+	SpriteH = 48.0
 )
 
 // Config holds movement/animation tuning (seconds and pixels).
@@ -117,7 +120,6 @@ type Snapshot struct {
 	Gun    Weapon  // armed pose while aiming/firing
 	Frame  int     // frame index within the current state's animation
 	T      float64 // seconds spent in the current state
-	Phase  float64 // walk cycle phase (0..WalkFrames)
 }
 
 // Agent is the gunman entity. Not safe for concurrent use.
@@ -152,6 +154,7 @@ func (a *Agent) Pos() (float64, float64) { return a.x, a.y }
 // SetPos teleports the agent and resets it to idle (used on file load).
 func (a *Agent) SetPos(x, y float64) {
 	a.x, a.y = x, y
+	a.facing = 1
 	a.state = StateIdle
 	a.t = 0
 	a.moveDur = 0
@@ -174,6 +177,8 @@ func (a *Agent) Busy() bool {
 }
 
 // WalkTo starts a speed-based walk toward (x, y), cancelling any aim.
+// Orientation follows the direction of travel: walking left turns him
+// left, walking right turns him right.
 func (a *Agent) WalkTo(x, y float64) {
 	a.fromX, a.fromY = a.x, a.y
 	a.toX, a.toY = x, y
@@ -224,6 +229,17 @@ func (a *Agent) Slash(facing int) {
 	a.state = StateSlash
 	a.t = 0
 	a.slashed = false
+}
+
+// Face turns the gunman in place to look toward dir (+1 right, -1 left)
+// without moving. Used by the turn-first input model: a directional press
+// in the opposite direction only turns him; the next press acts.
+func (a *Agent) Face(dir int) {
+	if dir < 0 {
+		a.facing = -1
+	} else {
+		a.facing = 1
+	}
 }
 
 // Win plays the celebration pose (after a save).
@@ -315,6 +331,9 @@ func (a *Agent) walk(dt float64) {
 		a.evs = append(a.evs, Event{Kind: EvArrived})
 		return
 	}
+	step := a.cfg.WalkSpeed * dt
+	// Orientation follows horizontal travel: left walk faces left,
+	// right walk faces right.
 	if abs(dx) > 0.5 {
 		if dx > 0 {
 			a.facing = 1
@@ -322,7 +341,6 @@ func (a *Agent) walk(dt float64) {
 			a.facing = -1
 		}
 	}
-	step := a.cfg.WalkSpeed * dt
 	if abs(dx) > 0.5 {
 		move := min(step, abs(dx))
 		if dx > 0 {
@@ -369,7 +387,7 @@ const walkFrames = 4
 
 // Snapshot returns the renderer view of the agent.
 func (a *Agent) Snapshot() Snapshot {
-	s := Snapshot{X: a.x, Y: a.y, Facing: a.facing, State: a.state, Gun: a.gun, T: a.t, Phase: a.phase}
+	s := Snapshot{X: a.x, Y: a.y, Facing: a.facing, State: a.state, Gun: a.gun, T: a.t}
 	switch a.state {
 	case StateWalk, StateDrag:
 		s.Frame = int(a.phase) % walkFrames

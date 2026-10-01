@@ -1,15 +1,18 @@
 package render
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 
-	"github.com/hajimehoshi/bitmapfont/v4"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+
+	"shooter/internal/fonts"
 
 	"shooter/internal/actions"
 	"shooter/internal/agent"
@@ -19,10 +22,10 @@ import (
 
 // Screen geometry (see package docs for how the numbers relate).
 const (
-	Scale = 2  // font pixel scale: a 6x16 glyph becomes a 12x32 cell
+	Scale = 2  // art-pixel scale: the 18x24 sprite becomes 36x48 screen px
 	Cols  = 80 // text viewport columns
 	Rows  = 16 // text viewport rows
-	BarH  = 32 // height of each HUD bar
+	BarH  = 48 // height of each HUD bar (one line of the shared GUI face)
 )
 
 // Palette: a dark DOS-terminal look.
@@ -55,9 +58,9 @@ var (
 
 // HUD carries the chrome information the renderer needs each frame.
 type HUD struct {
-	Path   string     // file being edited (shown in the top bar)
-	Menu   *MenuState // menu-bar interaction state (nil = no menu drawn)
-	Dialog *Dialog    // modal dialog (Help/About), nil when closed
+	SoundOn bool       // sound toggle state (top bar)
+	Menu    *MenuState // menu-bar interaction state (nil = no menu drawn)
+	Dialog  *Dialog    // modal dialog (Help/About), nil when closed
 
 	// Multiplayer presentation: remote participants (drawn as extra
 	// gunmen with name tags and cartoon chat bubbles) and the local
@@ -87,8 +90,12 @@ type Bubble struct {
 
 // Renderer owns the layout, sprite sheet and particle system.
 type Renderer struct {
-	face      text.Face
-	sheet     *spriteSheet
+	bufFace   text.Face               // document glyphs: sized so one advance == cellW
+	hudFace   text.Face               // chrome glyphs (menus, dialogs, status, tabs)
+	bufLineH  int                     // ceil of the document face line height (px)
+	hudLineH  int                     // ceil of the chrome face line height (px)
+	sheets    map[string]*spriteSheet // selectable character sheets
+	active    string                  // current sheet name (see SheetNames)
 	layout    Layout
 	particles []particle
 }
@@ -97,30 +104,88 @@ type Renderer struct {
 // is derived from the font metrics: cellW = advance*Scale and
 // cellH = (ascent+descent)*Scale, so every glyph exactly fills a cell.
 func New() (*Renderer, error) {
-	face := text.NewGoXFace(bitmapfont.Face)
-	advance := text.Advance("M", face)
-	m := face.Metrics()
-	cellW := int(math.Round(advance)) * Scale
-	cellH := int(math.Round(m.HAscent+m.HDescent)) * Scale
-	if cellW <= 0 {
-		cellW = 6 * Scale // defensive fallback
-	}
-	if cellH <= 0 {
-		cellH = 16 * Scale
-	}
-	sheet, err := newSpriteSheet()
+	src, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.JetBrainsMonoTTF))
 	if err != nil {
 		return nil, err
 	}
+	// The document face is the grid master: JetBrains Mono advances 0.6em,
+	// so a 30px face makes every glyph advance exactly cellW
+	// (artW/2*Scale = 18px) and columns stay aligned no matter how wide
+	// the runes are. The chrome face is a fixed 16px for the HUD, menus
+	// and dialogs.
+	// One face everywhere: document, HUD bars, menus, dialogs and tabs
+	// all share the same size (the user asked for uniform GUI type).
+	bufFace := &text.GoTextFace{Source: src, Size: 30}
+	cellW := int(math.Round(text.Advance("M", bufFace)))
+	if cellW != artW/2*Scale { // defensive: force the monospace advance
+		bufFace.Size = 3 * float64(artW)
+		cellW = int(math.Round(text.Advance("M", bufFace)))
+	}
+	cellH := artH * Scale // the sprite fills exactly one layout row
+	if cellW <= 0 {
+		cellW = artW / 2 * Scale
+	}
+	bufM := bufFace.Metrics()
+	sheets := make(map[string]*spriteSheet)
+	for name, art := range allSheets {
+		s, err := newSpriteSheet(art)
+		if err != nil {
+			return nil, fmt.Errorf("sheet %q: %w", name, err)
+		}
+		sheets[name] = s
+	}
+	// User sheets from sprites/<name>/ override the same-named built-in
+	// and add brand-new ones (Settings > Sprite Sheet lists the result).
+	disk, err := loadDiskSheets()
+	if err != nil {
+		return nil, err
+	}
+	for name, s := range disk {
+		sheets[name] = s
+	}
+	if len(sheets) == 0 {
+		return nil, fmt.Errorf("no sprite sheets")
+	}
 	return &Renderer{
-		face:   face,
-		sheet:  sheet,
-		layout: NewLayout(grid.Grid{CellW: cellW, CellH: cellH}, Cols, Rows, BarH),
+		bufFace:  bufFace,
+		bufLineH: int(math.Ceil(bufM.HAscent + bufM.HDescent)),
+		sheets:   sheets,
+		active:   defaultSheet,
+		layout:   NewLayout(grid.Grid{CellW: cellW, CellH: cellH}, Cols, Rows, BarH),
 	}, nil
 }
 
 // Layout returns the live layout (camera included) for click mapping.
 func (r *Renderer) Layout() *Layout { return &r.layout }
+
+// defaultSheet is the character shown at launch.
+const defaultSheet = "duke"
+
+// SheetNames lists the selectable character sheets.
+func (r *Renderer) SheetNames() []string {
+	out := make([]string, 0, len(r.sheets))
+	for n := range r.sheets {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ActiveSheet is the sheet currently used to draw the gunman.
+func (r *Renderer) ActiveSheet() string { return r.active }
+
+// SetSheet switches the character sheet. Returns false when the name is
+// unknown (the active sheet is left untouched).
+func (r *Renderer) SetSheet(name string) bool {
+	if _, ok := r.sheets[name]; !ok {
+		return false
+	}
+	r.active = name
+	return true
+}
+
+// sheet returns the active sprite sheet (never nil while a set exists).
+func (r *Renderer) sheet() *spriteSheet { return r.sheets[r.active] }
 
 // ScreenSize returns the fixed window size for Ebitengine's Layout hook.
 func (r *Renderer) ScreenSize() (int, int) { return r.layout.ScreenW, r.layout.ScreenH }
@@ -160,7 +225,9 @@ func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hu
 		}
 		y := float64(l.OriginY) + float64(line*l.CellH) - l.ScrollY +
 			swapOffset(line, v.Swaps, l.CellH)
-		r.drawText(screen, d.Line(line), float64(l.OriginX)-l.ScrollX, y, colText, Scale)
+		// Glyphs are shorter than the cell, so centre each line vertically.
+		y += float64((l.CellH - r.bufLineH) / 2)
+		r.drawText(screen, d.Line(line), float64(l.OriginX)-l.ScrollX, y, colText)
 	}
 
 	// World entities, converted to screen space (the gunman covers his
@@ -188,7 +255,7 @@ func (r *Renderer) Draw(screen *ebiten.Image, d doc.Document, v actions.View, hu
 	}
 
 	// HUD chrome on top so bleed-over from the text is covered.
-	r.drawHUD(screen, d, v, hud)
+	r.drawHUD(screen, v, hud)
 	r.drawMenu(screen, hud)
 	if hud.Dialog != nil {
 		r.drawDialog(screen, *hud.Dialog)
@@ -218,17 +285,19 @@ func swapOffset(line int, swaps []actions.Swap, cellH int) float64 {
 // offset, optional mirror (still in art space), the art->screen scale that
 // matches the font's pixel size, then placement in screen space.
 func (r *Renderer) drawAgent(screen *ebiten.Image, a agent.Snapshot, offX, offY float64) {
-	id, xOff, yOff := r.sheet.pose(a)
+	id, xOff, yOff := r.sheet().pose(a)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(float64(xOff), float64(yOff))
-	if a.Facing < 0 {
+	if a.Facing > 0 {
+		// The pixel array is the LEFT-facing base art; facing right is
+		// derived by mirroring around the sprite box.
 		op.GeoM.Scale(-1, 1)
 		op.GeoM.Translate(artW, 0)
 	}
 	op.GeoM.Scale(float64(Scale), float64(Scale))
 	op.GeoM.Translate(a.X+offX, a.Y+offY)
 	op.Filter = ebiten.FilterNearest
-	screen.DrawImage(r.sheet.image(id), op)
+	screen.DrawImage(r.sheet().image(id), op)
 }
 
 // drawLetter draws a thrown rune arcing from the gun tip to its cell.
@@ -236,7 +305,7 @@ func (r *Renderer) drawLetter(screen *ebiten.Image, l actions.Letter, offX, offY
 	t := math.Min(1, math.Max(0, l.T))
 	x := l.FromX + (l.ToX-l.FromX)*t + offX
 	y := l.FromY + (l.ToY-l.FromY)*t + offY - math.Sin(math.Pi*t)*14
-	scale := float64(Scale) * (1 + 0.25*math.Sin(math.Pi*t)) // little pop mid-flight
+	scale := 1 + 0.25*math.Sin(math.Pi*t) // little pop mid-flight (1 = natural)
 	r.drawRuneCentered(screen, l.R, x, y, scale, colLetter)
 }
 
@@ -249,14 +318,13 @@ func (r *Renderer) drawKatana(screen *ebiten.Image, a agent.Snapshot, offX, offY
 		return
 	}
 	const (
-		bladeLen = 30 // giant: nearly as tall as he is
-		handle   = 5
+		bladeLen = 15 * Scale // giant: about one sprite-height of blade
+		handle   = 3 * Scale
 	)
 	ang := katanaAngle(a.T)
-	dir := float64(a.Facing)
-	// Hands: front of the chest, mid height.
-	hx := a.X + offX + 12 + dir*7
-	hy := a.Y + offY + 17
+	dir := float64(a.Facing) // blade follows the struck direction
+	hx := katanaPivotX(a, offX)
+	hy := a.Y + offY + agent.SpriteH/2 - 2*float64(Scale)
 
 	// Trail: an arc the blade just swept through (only while it moves).
 	if a.T > 0.06 && a.T < 0.26 {
@@ -292,14 +360,15 @@ func (r *Renderer) drawKatana(screen *ebiten.Image, a agent.Snapshot, offX, offY
 }
 
 // katanaAngle maps a swing's elapsed time (seconds) to the blade angle.
-// 0..0.10 raises the sword behind his head, 0.10..0.20 is the cut, and
-// the rest is follow-through.
+// 0..0.10 raises the sword from the sheath, 0.10..0.20 is the cut, and the
+// blade holds pointing at the struck glyph at face/eye height afterwards
+// (slightly up, so the tip ends near his eyes, not the floor).
 func katanaAngle(t float64) float64 {
 	const (
 		raised = -100 * math.Pi / 180
-		cut0   = -55 * math.Pi / 180
-		cut1   = 65 * math.Pi / 180
-		follow = 82 * math.Pi / 180
+		cut0   = -40 * math.Pi / 180
+		cut1   = -15 * math.Pi / 180
+		follow = -15 * math.Pi / 180
 	)
 	lerp := func(a, b, k float64) float64 { return a + (b-a)*math.Min(1, math.Max(0, k)) }
 	switch {
@@ -366,7 +435,7 @@ func (r *Renderer) drawRocket(screen *ebiten.Image, tailX, tailY, headX, headY, 
 
 // drawHUD draws the top bar (file, position) and bottom bar (hints,
 // status message).
-func (r *Renderer) drawHUD(screen *ebiten.Image, d doc.Document, v actions.View, hud HUD) {
+func (r *Renderer) drawHUD(screen *ebiten.Image, v actions.View, hud HUD) {
 	w, h := float32(r.layout.ScreenW), float32(r.layout.ScreenH)
 	// Bars.
 	vector.DrawFilledRect(screen, 0, 0, w, BarH, colBar, false)
@@ -390,41 +459,42 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, d doc.Document, v actions.View,
 			col = colText
 		}
 		r.drawText(screen, hud.Tabs[i].Title,
-			float64(rc.X+10), float64(rc.Y+2), col, 1)
+			float64(rc.X+10), float64(rc.Y+2), col)
 	}
 	vector.DrawFilledRect(screen, 0, h-BarH, w, BarH, colBar, false)
 	vector.DrawFilledRect(screen, 0, BarH-1, w, 1, colBorder, false)
 	vector.DrawFilledRect(screen, 0, h-BarH, w, 1, colBorder, false)
 
-	// Top-left: File/Help menu buttons, then the file name + dirty marker.
+	// Top-left: File/Help menu buttons. (The filename lives in the tab
+	// strip below - not repeated here.)
 	r.drawMenuButtons(screen, hud)
-	name := hud.Path
-	if name == "" {
-		name = "untitled"
+	// Top-right: sound toggle, then the caret position.
+	sb := SoundBtnRect(r.layout.ScreenW)
+	label, col := "Sound: on", colText
+	if !hud.SoundOn {
+		label, col = "Sound: off", colDim
 	}
-	if d.Dirty() {
-		name += " *"
+	if hud.Menu != nil && hud.Menu.HoverBtn == HoverSound {
+		vector.DrawFilledRect(screen, float32(sb.X-3), float32(sb.Y),
+			float32(sb.W), float32(sb.H), colMenuSel, false)
 	}
-	r.drawText(screen, name, float64(HelpBtn.X+HelpBtn.W+10), 8, colText, 1)
+	r.drawText(screen, label, float64(sb.X), 8, col)
 
 	// Top-right: caret position.
 	pos := fmt.Sprintf("Ln %d  Col %d", v.Caret.Line+1, v.Caret.Col+1)
-	r.drawTextRight(screen, pos, r.layout.ScreenW-8, 8, colDim, 1)
+	r.drawTextRight(screen, pos, r.layout.ScreenW-8, 8, colDim)
 
-	// Bottom-left: key hints, or the chat draft line while chatting.
+	// Bottom-left: the chat draft line while chatting (no key hints on
+	// screen - the help dialog documents the bindings).
 	if hud.ChatDraft != nil {
 		r.drawText(screen, "SAY: "+*hud.ChatDraft+"_", 8,
-			float64(r.layout.ScreenH-BarH+8), colStatus, 1)
-	} else {
-		r.drawText(screen,
-			"TYPE  BKSP:katana  ^BKSP:word  ^K:line  R-CLICK:shot  CLICK:walk  F2:say  ^S:save  F1:help",
-			8, float64(r.layout.ScreenH-BarH+8), colDim, 1)
+			float64(r.layout.ScreenH-BarH+8), colStatus)
 	}
 
 	// Bottom-right: status message.
 	if v.Status != "" {
 		r.drawTextRight(screen, v.Status, r.layout.ScreenW-8,
-			r.layout.ScreenH-BarH+8, colStatus, 1)
+			r.layout.ScreenH-BarH+8, colStatus)
 	}
 }
 
@@ -439,12 +509,14 @@ func (r *Renderer) drawMenuButtons(screen *ebiten.Image, hud HUD) {
 	btns := []btn{
 		{FileBtn, "File", 0},
 		{HelpBtn, "Help", 1},
+		{SettingsBtn, "Settings", HoverSettings},
 	}
 	for _, b := range btns {
 		active := false
 		if hud.Menu != nil {
 			if (b.id == 0 && hud.Menu.Open == MenuFile) ||
-				(b.id == 1 && hud.Menu.Open == MenuHelp) {
+				(b.id == 1 && hud.Menu.Open == MenuHelp) ||
+				(b.id == HoverSettings && hud.Menu.Open == MenuSettings) {
 				active = true
 			}
 			if hud.Menu.HoverBtn == b.id {
@@ -455,7 +527,7 @@ func (r *Renderer) drawMenuButtons(screen *ebiten.Image, hud HUD) {
 			vector.DrawFilledRect(screen, float32(b.rect.X-3), float32(b.rect.Y),
 				float32(b.rect.W), float32(b.rect.H), colMenuSel, false)
 		}
-		r.drawText(screen, b.label, float64(b.rect.X), float32y(b.rect.Y+6), colText, 1)
+		r.drawText(screen, b.label, float64(b.rect.X), float32y(b.rect.Y+6), colText)
 	}
 }
 
@@ -467,10 +539,7 @@ func (r *Renderer) drawMenu(screen *ebiten.Image, hud HUD) {
 	if hud.Menu == nil || hud.Menu.Open == MenuNone {
 		return
 	}
-	labels, btn := FileMenuItems, FileBtn
-	if hud.Menu.Open == MenuHelp {
-		labels, btn = HelpMenuItems, HelpBtn
-	}
+	labels, btn := MenuLabels(hud.Menu.Open)
 	rects := DropRects(btn, labels)
 	w := DropWidth(labels)
 	h := len(labels) * dropItemH
@@ -484,7 +553,7 @@ func (r *Renderer) drawMenu(screen *ebiten.Image, hud HUD) {
 			vector.DrawFilledRect(screen, float32(rc.X), float32(rc.Y),
 				float32(rc.W), float32(rc.H), colMenuSel, false)
 		}
-		r.drawText(screen, labels[i], float64(rc.X+10), float64(rc.Y+3), colText, 1)
+		r.drawText(screen, labels[i], float64(rc.X+10), float64(rc.Y+3), colText)
 	}
 }
 
@@ -500,56 +569,56 @@ func (r *Renderer) drawDialog(screen *ebiten.Image, d Dialog) {
 		float32(width), float32(height), colBar, false)
 	vector.DrawFilledRect(screen, float32(x), float32(y),
 		float32(width), float32(titleH), colTitleBar, false)
-	r.drawText(screen, d.Title, float64(x+pad), float64(y+5), colBarText, 1)
+	r.drawText(screen, d.Title, float64(x+pad), float64(y+5), colBarText)
 	for i, l := range d.Lines {
 		col := colText
 		if strings.HasPrefix(l, "http") || strings.HasPrefix(l, "Support") {
 			col = colStatus // highlight the support line and the link
 		}
-		r.drawText(screen, l, float64(x+pad), float64(y+titleH+i*lineH), col, 1)
+		r.drawText(screen, l, float64(x+pad), float64(y+titleH+i*lineH), col)
 	}
 	r.drawText(screen, "Esc or click to close",
-		float64(x+pad), float64(y+titleH+len(d.Lines)*lineH+pad), colDim, 1)
+		float64(x+pad), float64(y+titleH+len(d.Lines)*lineH+pad), colDim)
 }
 
 // drawText draws s with its upper-left corner at (x, y). GeoM operations
 // are applied in call order: scale the glyph space first, then place it.
-func (r *Renderer) drawText(dst *ebiten.Image, s string, x, y float64, col color.Color, scale int) {
+// drawText draws s with its upper-left corner at (x, y). There is a single
+// GUI face (document + chrome alike), so no glyph-space scaling happens.
+func (r *Renderer) drawText(dst *ebiten.Image, s string, x, y float64, col color.Color) {
 	op := &text.DrawOptions{}
-	op.GeoM.Scale(float64(scale), float64(scale))
 	op.GeoM.Translate(x, y)
 	op.ColorScale.ScaleWithColor(col)
-	op.Filter = ebiten.FilterNearest
-	text.Draw(dst, s, r.face, op)
+	text.Draw(dst, s, r.bufFace, op)
 }
 
 // drawTextRight draws s so that it ends at x (upper edge at y).
-func (r *Renderer) drawTextRight(dst *ebiten.Image, s string, x, y int, col color.Color, scale int) {
-	w := text.Advance(s, r.face) * float64(scale)
-	r.drawText(dst, s, float64(x)-w, float64(y), col, scale)
+func (r *Renderer) drawTextRight(dst *ebiten.Image, s string, x, y int, col color.Color) {
+	w := text.Advance(s, r.bufFace)
+	r.drawText(dst, s, float64(x)-w, float64(y), col)
 }
 
 // drawRuneCentered draws one rune centred on (cx, cy) at the given scale:
 // centre the glyph box in local space, scale it, then place it.
 func (r *Renderer) drawRuneCentered(dst *ebiten.Image, ch rune, cx, cy, scale float64, col color.Color) {
 	s := string(ch)
-	w := text.Advance(s, r.face)
-	m := r.face.Metrics()
+	w := text.Advance(s, r.bufFace)
+	m := r.bufFace.Metrics()
 	h := m.HAscent + m.HDescent
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(-w/2, -h/2)
-	op.GeoM.Scale(scale, scale)
+	op.GeoM.Scale(scale, scale) // relative: 1 = natural document size
 	op.GeoM.Translate(cx, cy)
 	op.ColorScale.ScaleWithColor(col)
 	op.Filter = ebiten.FilterNearest
-	text.Draw(dst, s, r.face, op)
+	text.Draw(dst, s, r.bufFace, op)
 }
 
 // runeDrawer adapts drawRuneCentered for the particle renderer, applying
 // the world-to-screen offset.
 func (r *Renderer) runeDrawer(dst *ebiten.Image, offX, offY float64) func(rune, float64, float64, color.Color) {
 	return func(ch rune, x, y float64, col color.Color) {
-		r.drawRuneCentered(dst, ch, x+offX, y+offY, Scale, col)
+		r.drawRuneCentered(dst, ch, x+offX, y+offY, 1, col)
 	}
 }
 
@@ -560,23 +629,25 @@ func (r *Renderer) drawActor(screen *ebiten.Image, a Actor, offX, offY float64) 
 	snap := agent.Snapshot{
 		X: a.X, Y: a.Y, Facing: a.Facing, State: a.State, T: a.T,
 	}
-	id, xOff, yOff := r.sheet.pose(snap)
+	id, xOff, yOff := r.sheet().pose(snap)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Translate(float64(xOff), float64(yOff))
-	if a.Facing < 0 {
+	if a.Facing > 0 {
+		// The pixel array is the LEFT-facing base art; facing right is
+		// derived by mirroring around the sprite box.
 		op.GeoM.Scale(-1, 1)
 		op.GeoM.Translate(artW, 0)
 	}
 	op.GeoM.Scale(float64(Scale), float64(Scale))
 	op.GeoM.Translate(a.X+offX, a.Y+offY)
 	op.Filter = ebiten.FilterNearest
-	screen.DrawImage(r.sheet.image(id), op)
+	screen.DrawImage(r.sheet().image(id), op)
 
 	top := a.Y + offY
 	if a.Name != "" {
-		w := text.Advance(a.Name, r.face)
-		r.drawText(screen, a.Name, a.X+offX+agent.SpriteW/2-w/2, top-11, colActorName, 1)
-		top -= 11
+		w := text.Advance(a.Name, r.bufFace)
+		r.drawText(screen, a.Name, a.X+offX+agent.SpriteW/2-w/2, top-float64(r.bufLineH), colActorName)
+		top -= float64(r.bufLineH)
 	}
 	if a.Chat != "" && a.ChatT < BubbleLife {
 		r.drawBubble(screen, a.X+offX+agent.SpriteW/2, top-3, Bubble{Text: a.Chat, T: a.ChatT})
@@ -626,7 +697,7 @@ func (r *Renderer) drawBubble(screen *ebiten.Image, cx, anchorY float64, b Bubbl
 		float32(w+4), float32(h+4), edge, false)
 	vector.DrawFilledRect(screen, float32(x), float32(y),
 		float32(w), float32(h), body, false)
-	r.drawText(screen, text, x+7, y+5, textCol, 1)
+	r.drawText(screen, text, x+7, y+5, textCol)
 }
 
 // tabTitles extracts titles for hit-testing geometry.
@@ -636,4 +707,21 @@ func tabTitles(tabs []TabInfo) []string {
 		out[i] = t.Title
 	}
 	return out
+}
+
+// katanaPivotX is the blade origin during a slash. The sword lives in the
+// sheath on his back (the back edge of the sprite, ~5 art px off centre):
+// the pivot starts at the sheath (t ~ 0) and slides into his front hands
+// as he draws and cuts (t >= ~0.14), so the blade ends pointing at the
+// struck glyph at eye height.
+func katanaPivotX(a agent.Snapshot, offX float64) float64 {
+	dir := float64(a.Facing)
+	backX := a.X + agent.SpriteW/2 - dir*5*float64(Scale)
+	frontX := a.X + agent.SpriteW/2 + dir*5*float64(Scale)
+	k := a.T / 0.14
+	if k > 1 {
+		k = 1
+	}
+	k = k * k * (3 - 2*k) // smoothstep
+	return backX + (frontX-backX)*k + offX
 }
