@@ -45,9 +45,6 @@ func (l *Layout) LockScrollX() { l.scrollLockX = true }
 // UnlockScrollX resumes the caret-following camera.
 func (l *Layout) UnlockScrollX() { l.scrollLockX = false }
 
-// ScrollLockedX reports whether the horizontal camera is frozen.
-func (l *Layout) ScrollLockedX() bool { return l.scrollLockX }
-
 // SetScrollXFrac jumps the horizontal camera to a fraction of the widest
 // line (scrollbar thumb): 0 = left, 1 = right.
 func (l *Layout) SetScrollXFrac(frac float64, d doc.Document) {
@@ -66,9 +63,6 @@ func (l *Layout) LockScrollY() { l.scrollLockY = true }
 
 // UnlockScrollY resumes the caret-following camera.
 func (l *Layout) UnlockScrollY() { l.scrollLockY = false }
-
-// ScrollLockedY reports whether the vertical camera is frozen.
-func (l *Layout) ScrollLockedY() bool { return l.scrollLockY }
 
 // SetScrollYFrac jumps the vertical camera to a fraction of the document
 // height (scrollbar thumb): 0 = top, 1 = bottom.

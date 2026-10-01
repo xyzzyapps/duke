@@ -474,6 +474,15 @@ func main() {
 			}
 			engine.SetGrid(rend.Layout().Grid)
 			saveSettings(rend.ActiveSheet(), size)
+			// The font size rebuilds the canvas (the 80x20 grid keeps only
+			// this shape at the OLD window size, which would letterbox):
+			// re-fit the window to the new canvas edge-to-edge.
+			w, h := rend.ScreenSize()
+			if m := ebiten.Monitor(); m != nil {
+				mw, mh := m.Size()
+				w, h = fitWindowToMonitor(w, h, mw, mh)
+			}
+			ebiten.SetWindowSize(w, h)
 			return true
 		},
 		Tabs: tabs,

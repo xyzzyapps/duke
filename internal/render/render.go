@@ -207,9 +207,6 @@ func (r *Renderer) rebuildLayout() {
 	r.layout = NewLayout(grid.Grid{CellW: cellW, CellH: artH * Scale}, Cols, Rows, BarH)
 }
 
-// CellW is the current grid cell width (the font advance, rounded).
-func (r *Renderer) CellW() int { return r.layout.CellW }
-
 // Layout returns the live layout (camera included) for click mapping.
 func (r *Renderer) Layout() *Layout { return &r.layout }
 

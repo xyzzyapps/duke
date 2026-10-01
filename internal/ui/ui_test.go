@@ -457,6 +457,23 @@ func TestFileMenuNewClearsBuffer(t *testing.T) {
 	}
 }
 
+func TestFileMenuListsOpen(t *testing.T) {
+	// The File dropdown must offer Open... between New and Save (users
+	// navigate the menu by position).
+	h := newHarness("hi")
+	clickCenter(h, render.FileBtn)
+	labels, _ := h.editor.menuLabels()
+	if len(labels) != 4 || labels[1] != "Open..." {
+		t.Fatalf("file menu = %v, want [New Open... Save Close]", labels)
+	}
+	// Every item has a hit-testable rect inside the window.
+	for i, rc := range render.DropRects(render.FileBtn, labels) {
+		if !rc.Contains(rc.X+2, rc.Y+2) {
+			t.Fatalf("item %d rect unusable: %+v", i, rc)
+		}
+	}
+}
+
 func TestFileMenuOpenLoadsPickedFile(t *testing.T) {
 	// The fake store holds two files; the mocked open dialog picks the
 	// second one.
