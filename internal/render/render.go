@@ -486,7 +486,7 @@ func (r *Renderer) drawHUD(screen *ebiten.Image, v actions.View, hud HUD) {
 	stripY := float32(BarH)
 	vector.DrawFilledRect(screen, 0, stripY, w, TabBarHeight, colStrip, false)
 	vector.DrawFilledRect(screen, 0, stripY+TabBarHeight-1, w, 1, colBorder, false)
-	rects := TabBarRects(tabTitles(hud.Tabs))
+	rects := TabBarRects(tabTitles(hud.Tabs), r.layout.CellW)
 	for i, rc := range rects {
 		if i >= len(hud.Tabs) {
 			break

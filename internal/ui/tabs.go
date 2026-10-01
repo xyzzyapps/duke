@@ -126,7 +126,7 @@ func (e *Editor) TabHitTest(x, y int) (int, bool) {
 	if e.svc.Tabs == nil {
 		return 0, false
 	}
-	return render.TabHit(e.svc.Tabs.Titles(), x, y)
+	return render.TabHit(e.svc.Tabs.Titles(), e.svc.Layout.CellW, x, y)
 }
 
 // setPath retargets the active tab (File > New) and the services copy.

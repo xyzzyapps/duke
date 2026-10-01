@@ -199,17 +199,20 @@ func TabTitle(path string) string {
 	return base
 }
 
-// TabBarRects lays out the tab strip (y = top bar bottom + padding).
-func TabBarRects(titles []string) []Rect {
+// TabBarRects lays out the tab strip (y = top bar bottom + padding). The
+// box width follows the LIVE glyph advance (cellW, which tracks the font
+// size) so a title never overflows its own box: tab text is drawn
+// unclipped, and a capped box would let a long name's glyphs collide
+// with the next tab. The minimum box is "untitled" + 3 characters (11
+// glyphs), so short names keep a uniform tab look. Extra-wide strips
+// simply clip at the window edge.
+func TabBarRects(titles []string, cellW int) []Rect {
 	out := make([]Rect, len(titles))
 	x := 8
 	for i, t := range titles {
-		w := len(t)*charW + 22
-		if w < 72 {
-			w = 72
-		}
-		if w > 150 {
-			w = 150
+		w := len(t)*cellW + 22
+		if minW := 11*cellW + 22; w < minW {
+			w = minW
 		}
 		out[i] = Rect{X: x, Y: BarH + 3, W: w, H: TabBarHeight - 6}
 		x += w + 4
@@ -218,8 +221,8 @@ func TabBarRects(titles []string) []Rect {
 }
 
 // TabHit maps a click on the tab strip to a tab index.
-func TabHit(titles []string, x, y int) (int, bool) {
-	for i, r := range TabBarRects(titles) {
+func TabHit(titles []string, cellW int, x, y int) (int, bool) {
+	for i, r := range TabBarRects(titles, cellW) {
 		if r.Contains(x, y) {
 			return i, true
 		}

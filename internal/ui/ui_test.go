@@ -808,7 +808,7 @@ func TestCannotCloseLastTab(t *testing.T) {
 func TestTabStripClickSwitches(t *testing.T) {
 	h := newHarness("zero")
 	h.bus.Publish(events.KeyPressed{Key: ebiten.KeyT, Ctrl: true}) // now on tab 1
-	rects := render.TabBarRects(h.editor.svc.Tabs.Titles())
+	rects := render.TabBarRects(h.editor.svc.Tabs.Titles(), h.editor.svc.Layout.CellW)
 	// Click tab 0's rect: back to the first tab.
 	h.bus.Publish(events.MousePressed{
 		X: rects[0].X + 5, Y: rects[0].Y + 3, Button: ebiten.MouseButtonLeft,
@@ -821,7 +821,7 @@ func TestTabStripClickSwitches(t *testing.T) {
 	}
 	// Viewport was NOT walked by the strip click.
 	walksBefore := len(h.engine.walks)
-	rects = render.TabBarRects(h.editor.svc.Tabs.Titles())
+	rects = render.TabBarRects(h.editor.svc.Tabs.Titles(), h.editor.svc.Layout.CellW)
 	h.bus.Publish(events.MousePressed{
 		X: rects[1].X + 5, Y: rects[1].Y + 3, Button: ebiten.MouseButtonLeft,
 	})

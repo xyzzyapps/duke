@@ -156,7 +156,7 @@ func TestSwapOffsetAnimatesBothRows(t *testing.T) {
 
 func TestTabBarRectsAndHit(t *testing.T) {
 	titles := []string{"notes.txt", "untitled-2"}
-	rects := TabBarRects(titles)
+	rects := TabBarRects(titles, 18)
 	if len(rects) != 2 {
 		t.Fatalf("rects = %d", len(rects))
 	}
@@ -168,11 +168,36 @@ func TestTabBarRectsAndHit(t *testing.T) {
 			t.Fatalf("tab not inside strip: %+v", r)
 		}
 	}
-	if i, ok := TabHit(titles, rects[1].X+5, rects[1].Y+3); !ok || i != 1 {
+	if i, ok := TabHit(titles, 18, rects[1].X+5, rects[1].Y+3); !ok || i != 1 {
 		t.Fatalf("hit = %d ok=%v, want 1", i, ok)
 	}
-	if _, ok := TabHit(titles, 10, 500); ok {
+	if _, ok := TabHit(titles, 18, 10, 500); ok {
 		t.Fatal("click far below the strip must miss")
+	}
+}
+
+func TestTabRectsNeverOverlapTitles(t *testing.T) {
+	// Tab text is drawn unclipped: the box must always be wide enough
+	// that a title's last glyph never reaches the NEXT tab's text, and
+	// short names keep the "untitled" + 3 glyph minimum.
+	titles := []string{"hello.txt", "untitled", "a-very-long-file-name.txt~"}
+	rects := TabBarRects(titles, 18)
+	if rects[0].W != 11*18+22 {
+		t.Fatalf("hello.txt (9 chars < 11) box = %d, want the untitled+3 minimum %d", rects[0].W, 11*18+22)
+	}
+	if rects[1].W != 11*18+22 {
+		t.Fatalf("short-name box = %d, want the untitled+3 minimum %d", rects[1].W, 11*18+22)
+	}
+	for i := 0; i+1 < len(rects); i++ {
+		end := rects[i].X + 10 + len(titles[i])*18
+		if end > rects[i+1].X+10 {
+			t.Fatalf("tab %q text (ends %d) overlaps tab %q text (starts %d)",
+				titles[i], end, titles[i+1], rects[i+1].X+10)
+		}
+	}
+	// The minimum follows the glyph advance (font-size aware).
+	if w := TabBarRects([]string{"x"}, 14)[0].W; w != 11*14+22 {
+		t.Fatalf("minimum at cellW 14 = %d, want %d", w, 11*14+22)
 	}
 }
 
