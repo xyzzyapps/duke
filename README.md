@@ -70,6 +70,10 @@ averaging by `dump/sprtool`:
 - `sprites/demon/` — the [CC0 "Demon, walking and fight
   animation"](https://opengameart.org/content/demon-walking-and-fight-animation)
   by **z11z11** (100x100 frames)
+- `sprites/skeleton/` + `sprites/ghost/` — the [CC0 "Skeleton and Ghost
+  spritesheets (Ars Notoria)"](https://opengameart.org/content/skeleton-and-ghost-spritesheets-ars-notoria)
+  by **Balmer** — the skeleton's 36x48 cells match the game grid exactly;
+  the ghost floats his own way (row-mirrored walk)
 
 ## Swap the sprites yourself
 
