@@ -50,6 +50,8 @@ const (
 	SoundStamp
 	// SoundSave: the save chime.
 	SoundSave
+	// SoundStep: a footfall on the walk cycle's contact beats.
+	SoundStep
 )
 
 // String makes cue names readable in logs.

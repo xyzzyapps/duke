@@ -68,6 +68,9 @@ const (
 	// EvSlash: the melee strike connected this tick; apply the hit
 	// directly (no projectile).
 	EvSlash
+	// EvStep: a footfall on the walk cycle's contact beats (the shell
+	// plays the step sound).
+	EvStep
 )
 
 // Event is one edge notification from Tick.
@@ -307,11 +310,16 @@ func (a *Agent) Tick(dt float64) []Event {
 	case StateIdle:
 		// breathing only
 	}
-	// Advance the leg-cycle animation while moving.
+	// Advance the leg-cycle animation while moving. Footfalls land on the
+	// contact beats (phase crossing 2, and wrapping back through 0).
 	if a.state == StateWalk || a.state == StateDrag {
+		prev := a.phase
 		a.phase += dt * 9 // 9 frames per second walk cycle
 		if a.phase >= walkFrames {
 			a.phase -= walkFrames
+		}
+		if (prev < 2 && a.phase >= 2) || prev > a.phase {
+			a.evs = append(a.evs, Event{Kind: EvStep})
 		}
 	} else {
 		a.phase = 0

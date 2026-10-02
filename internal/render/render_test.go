@@ -117,3 +117,26 @@ func TestTruncateChatToOneBubbleLine(t *testing.T) {
 		t.Fatal("empty chat must stay empty")
 	}
 }
+
+func TestShippedSheetsAllLoad(t *testing.T) {
+	// Regression: every folder under the repo's sprites/ must load as a
+	// complete, usable sheet (the Settings picker lists them live).
+	sheets, err := loadDiskSheetsFrom("../../sprites")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sheets) < 2 {
+		t.Fatalf("shipped sheets = %v, want duke + at least one more", sheets)
+	}
+	for name, s := range sheets {
+		missing := 0
+		for id := frameID(0); id < frameCount; id++ {
+			if s.raw[id] == nil {
+				missing++
+			}
+		}
+		if missing > 0 {
+			t.Fatalf("sheet %q is missing %d pose frames", name, missing)
+		}
+	}
+}

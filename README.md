@@ -60,6 +60,17 @@ sliced from the atlas (idle, the rifle run cycle, the rifle attack
 pose) and fitted to the game's 18x24 art box. It ships in
 `sprites/duke/` as editable PNGs.
 
+Two more CC0 characters ship as selectable sheets (Settings > Sprite
+Sheet), both fitted to the same 18x24 grid, resampled with area
+averaging by `dump/sprtool`:
+
+- `sprites/cyborg/` — the [CC0 "Douche Cyborg" run/shoot/idle
+  pack](https://opengameart.org/content/cc0-2d-douche-cyborg-jump-run-shoot-idle)
+  by **Darius Guerrero** (mirrored to left-facing)
+- `sprites/demon/` — the [CC0 "Demon, walking and fight
+  animation"](https://opengameart.org/content/demon-walking-and-fight-animation)
+  by **z11z11** (100x100 frames)
+
 ## Swap the sprites yourself
 
 The shipped characters live as **image files**, exactly like a game engine

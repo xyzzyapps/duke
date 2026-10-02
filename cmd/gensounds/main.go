@@ -16,5 +16,5 @@ func main() {
 	if err := audio.GenerateSamples(*dir); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("wrote samples to %s: slash, pistol, shotgun, rocket, stamp, save (.wav)", *dir)
+	log.Printf("wrote samples to %s: slash, pistol, shotgun, rocket, stamp, save, step (.wav)", *dir)
 }

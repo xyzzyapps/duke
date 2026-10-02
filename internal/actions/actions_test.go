@@ -1102,3 +1102,20 @@ func TestCaretAndAgentSurviveRemoteOps(t *testing.T) {
 		t.Fatalf("agent at (%v,%v), want (%v,%v) on the caret", v.Agent.X, v.Agent.Y, wantX, wantY)
 	}
 }
+
+func TestWalkingPlaysFootsteps(t *testing.T) {
+	e, _ := newEngine("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	e.WalkTo(doc.Pos{Line: 0, Col: 30})
+	heard := false
+	runUntil(e, 3, func() bool {
+		for _, s := range e.View().Sounds {
+			if s == fx.SoundStep {
+				heard = true
+			}
+		}
+		return e.View().Agent.State == agent.StateIdle // arrived
+	})
+	if !heard {
+		t.Fatal("a walk must cue the footstep sound")
+	}
+}

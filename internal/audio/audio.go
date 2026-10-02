@@ -42,6 +42,7 @@ var sampleNames = map[fx.Sound]string{
 	fx.SoundRocket:  "rocket.wav",
 	fx.SoundStamp:   "stamp.wav",
 	fx.SoundSave:    "save.wav",
+	fx.SoundStep:    "step.wav",
 }
 
 // Synth plays the pre-synthesised cues. All methods are safe on a nil
@@ -163,6 +164,7 @@ func allSounds() []fx.Sound {
 		fx.SoundRocket,
 		fx.SoundStamp,
 		fx.SoundSave,
+		fx.SoundStep,
 	}
 }
 
@@ -210,6 +212,8 @@ func pcm(snd fx.Sound) []byte {
 		return render(0.05, tick)
 	case fx.SoundSave:
 		return render(0.28, chime)
+	case fx.SoundStep:
+		return render(0.10, thud)
 	}
 	return render(0.01, func(float64) float64 { return 0 })
 }
@@ -300,6 +304,17 @@ func chime(t float64) float64 {
 		return math.Sin(2*math.Pi*880*(t-n2Beg)) * math.Exp(-(t-n2Beg)*7) * 0.4
 	}
 	return 0
+}
+
+// thud is a soft footfall: a low decaying thump with a whisper of noise -
+// the walk cycle fires it at ~2.25 beats per second on the contact frames.
+func thud(t float64) float64 {
+	if t > 0.10 {
+		return 0
+	}
+	env := math.Exp(-t * 55)
+	sig := 0.75*math.Sin(2*math.Pi*72*t) + 0.25*math.Sin(2*math.Pi*145*t)
+	return env * (sig*0.7 + noise()*0.3*0.35)
 }
 
 // GenerateSamples writes one WAV sample per cue into dir (creating it).

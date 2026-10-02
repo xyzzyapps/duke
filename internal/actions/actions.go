@@ -431,6 +431,8 @@ func (e *engine) Tick(dt float64) {
 			e.spawnBullet()
 		case agent.EvSlash:
 			e.applyHit() // melee connects: no projectile involved
+		case agent.EvStep:
+			e.play(fx.SoundStep) // footfall on the walk contact beats
 		}
 	}
 	e.tickBullet(dt)

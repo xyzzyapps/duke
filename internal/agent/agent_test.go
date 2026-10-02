@@ -276,3 +276,23 @@ func TestWalkFollowsDirection(t *testing.T) {
 		t.Fatal("walk right never ran")
 	}
 }
+
+func TestWalkEmitsFootstepsOnContactBeats(t *testing.T) {
+	a := New(Config{}, 0, 0)
+	a.SetPos(0, 0)
+	a.WalkTo(0, 4*48) // walk down four rows
+	steps := 0
+	for i := 0; i < 200; i++ {
+		for _, ev := range a.Tick(1.0 / 60) {
+			if ev.Kind == EvStep {
+				steps++
+			}
+		}
+	}
+	// The gait advances 9 phase-frames/s over a 4-frame cycle: two contact
+	// beats per cycle (phase crossing 2 and wrapping through 0) => 4.5
+	// footfalls per second while walking, then silence once he arrives.
+	if steps < 4 || steps > 22 {
+		t.Fatalf("footfalls = %d over 200 ticks, want 4..22 (4.5/s while walking)", steps)
+	}
+}
